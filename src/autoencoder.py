@@ -135,12 +135,10 @@ class AutoEncoder(pl.LightningModule):
         self.log('val_loss', loss)
 
         if batch_idx % 10 == 0:
-            eval = x_hat[0].cpu().numpy()
-            fig = plot_3d_point_cloud(eval[0, :], 
-                                    eval[1, :], 
-                                    eval[2, :], in_u_sphere=True)
-            wandb.log({'eval': wandb.Image(fig)})
-            plt.close()
+            recon = x_hat[0].cpu().numpy().T
+            wandb.log({'eval': wandb.Object3D(recon)})
+            gt = x[0].cpu().numpy().T
+            wandb.log({'ground_truth': wandb.Object3D(gt)})
 
         return loss
 
