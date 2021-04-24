@@ -13,10 +13,12 @@ cffi==1.14.5
 chardet==4.0.0
 click==7.1.2
 configparser==5.0.2
+crcmod==1.7
 cycler==0.10.0
 dataclasses==0.6
 decorator==5.0.7
 defusedxml==0.7.1
+distro-info==0.21
 docker-pycreds==0.4.0
 entrypoints==0.3
 fsspec==0.9.0
@@ -29,6 +31,7 @@ google-auth-oauthlib==0.4.4
 grpcio==1.37.0
 hydra-core==1.0.6
 idna==2.10
+importlib-metadata==4.0.1
 importlib-resources==5.1.2
 iopath==0.1.8
 ipykernel==5.5.3
@@ -73,12 +76,15 @@ ptyprocess==0.7.0
 pyasn1==0.4.8
 pyasn1-modules==0.2.8
 pycparser==2.20
+pycurl==7.43.0.2
 Pygments==2.8.1
+PyGObject==3.30.4
 pyparsing==2.4.7
 pyrsistent==0.17.3
+python-apt==1.8.4.3
 python-dateutil==2.8.1
 pytorch-lightning==1.2.7
-pytorch3d==0.4.0
+pytorch3d==0.3.0
 PyYAML==5.3.1
 pyzmq==22.0.3
 requests==2.25.1
@@ -103,6 +109,7 @@ tornado==6.1
 tqdm==4.60.0
 traitlets==5.0.5
 typing-extensions==3.7.4.3
+unattended-upgrades==0.1
 urllib3==1.26.4
 wandb==0.10.25
 wcwidth==0.2.5
@@ -110,3 +117,4 @@ webencodings==0.5.1
 Werkzeug==1.0.1
 yacs==0.1.8
 yarl==1.6.3
+zipp==3.4.1
