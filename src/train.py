@@ -14,8 +14,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpus', default=1)
     parser.add_argument('--data_dir')
+    args = parser.parse_args()
 
-    top_in_dir = 'gs://3d-recon/data/shape_net_core_uniform_samples_2048/' #  './data/shape_net_core_uniform_samples_2048/'
+    top_in_dir = './data/shape_net_core_uniform_samples_2048/'  # 'gs://3d-recon/data/shape_net_core_uniform_samples_2048/' 
     class_name = 'chair'
     syn_id = snc_category_to_synth_id()[class_name]
     class_dir = os.path.join(top_in_dir, syn_id)
@@ -27,6 +28,7 @@ if __name__ == "__main__":
 
     # TODO use config parameters
     ae = AutoEncoder(2048, 3, 128)
-    wandb_logger = WandbLogger(name='test', project='3d-recon')
+    wandb_logger = WandbLogger(name='test', project='3d-recon', entity='3drecon2')
     trainer = pl.Trainer(gpus=args.gpus, logger=wandb_logger)
     trainer.fit(ae, DataLoader(train_dataset, batch_size=50, num_workers=2), DataLoader(val_dataset, batch_size=50, num_workers=2))
+
