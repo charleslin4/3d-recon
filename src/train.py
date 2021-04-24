@@ -1,4 +1,5 @@
 import os
+import argparse
 
 import torch
 import pytorch_lightning as pl
@@ -10,7 +11,11 @@ from autoencoder import AutoEncoder
 
 
 if __name__ == "__main__":
-    top_in_dir = './data/shape_net_core_uniform_samples_2048/'
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--gpus', default=1)
+    parser.add_argument('--data_dir')
+
+    top_in_dir = 'gs://3d-recon/data/shape_net_core_uniform_samples_2048/' #  './data/shape_net_core_uniform_samples_2048/'
     class_name = 'chair'
     syn_id = snc_category_to_synth_id()[class_name]
     class_dir = os.path.join(top_in_dir, syn_id)
@@ -23,5 +28,5 @@ if __name__ == "__main__":
     # TODO use config parameters
     ae = AutoEncoder(2048, 3, 128)
     wandb_logger = WandbLogger(name='test', project='3d-recon')
-    trainer = pl.Trainer(gpus=1, logger=wandb_logger)
+    trainer = pl.Trainer(gpus=args.gpus, logger=wandb_logger)
     trainer.fit(ae, DataLoader(train_dataset, batch_size=50, num_workers=2), DataLoader(val_dataset, batch_size=50, num_workers=2))
