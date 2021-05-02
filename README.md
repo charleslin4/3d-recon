@@ -1,3 +1,6 @@
 # 3d-recon
 
-To get started, create a virtual environment and run `pip install -r requirements.txt`.
+Dependencies:
+* `torch==1.7.0`
+* `pytorch-lightning==1.2.7`
+* `pytorch3d==0.4.0`
