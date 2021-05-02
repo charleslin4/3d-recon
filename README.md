@@ -7,7 +7,7 @@
 * `wandb==0.10.27`
 
 
-Upon install Pytorch3D, run the following:
+After installing Pytorch3D, run the following:
 
 ```
 wget https://raw.githubusercontent.com/facebookresearch/pytorch3d/master/pytorch3d/datasets/shapenet/shapenet_synset_dict_v1.json -P /path/to/pytorch3d/datasets/shapenet
