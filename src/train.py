@@ -2,33 +2,34 @@ import os
 import argparse
 
 import torch
+from torch.utils.data import DataLoader
+from pytorch3d.datasets import R2N2, collate_batched_R2N2
+
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 
-from torch.utils.data import DataLoader, random_split
-from in_out import snc_category_to_synth_id, create_dir, PointCloudDataSet, load_all_point_clouds_under_folder
 from autoencoder import AutoEncoder
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpus', default=1)
-    parser.add_argument('--data_dir')
+    parser.add_argument('--data_dir', type=str, default='/home/data')
     args = parser.parse_args()
 
-    top_in_dir = './data/shape_net_core_uniform_samples_2048/'  # 'gs://3d-recon/data/shape_net_core_uniform_samples_2048/' 
-    class_name = 'chair'
-    syn_id = snc_category_to_synth_id()[class_name]
-    class_dir = os.path.join(top_in_dir, syn_id)
-    dataset = load_all_point_clouds_under_folder(class_dir, n_threads=8, file_ending='.ply', verbose=True)
+    synsets = ['cabinet']  # use one synset for easy prototyping
+    shapenet_path = os.path.join(args.data_dir, 'ShapeNet/ShapeNetCore.v1')
+    r2n2_path = os.path.join(args.data_dir, 'ShapeNet')
+    r2n2_splits = os.path.join(args.data_dir, 'ShapeNet/ShapeNetRendering/pix2mesh_splits_val05.json')
 
-    train_size = int(0.8 * len(dataset))
-    val_size = len(dataset) - train_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    train_set = R2N2("train", shapenet_path, r2n2_path, r2n2_splits, return_voxels=False)
+    val_set = R2N2("val", shapenet_path, r2n2_path, r2n2_splits, return_voxels=False)
 
-    # TODO use config parameters
-    ae = AutoEncoder(2048, 3, 128)
+    train_loader = DataLoader(train_set, batch_size=4, collate_fn=collate_batched_R2N2, num_workers=2)
+    val_loader = DataLoader(val_set, batch_size=4, collate_fn=collate_batched_R2N2, num_workers=2)
+
+    ae = AutoEncoder()  # TODO pass in whatever args are used in the constructor
     wandb_logger = WandbLogger(name='test', project='3d-recon', entity='3drecon2')
     trainer = pl.Trainer(gpus=args.gpus, logger=wandb_logger)
-    trainer.fit(ae, DataLoader(train_dataset, batch_size=50, num_workers=2), DataLoader(val_dataset, batch_size=50, num_workers=2))
+    trainer.fit(ae, train_loader, val_loader)
 

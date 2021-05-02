@@ -2,9 +2,7 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 from pytorch3d.loss import chamfer
-from general_utils import plot_3d_point_cloud
 import wandb
-import matplotlib.pyplot as plt
 
 class Encoder(nn.Module):
 
@@ -41,6 +39,8 @@ class Encoder(nn.Module):
             nn.ReLU()
         )
 
+        raise NotImplementedError
+
     def forward(self, x):
         out = self.conv1_bn(x)
         out = self.conv2_bn(out)
@@ -71,6 +71,8 @@ class Decoder(nn.Module):
             nn.Linear(128, out_channels)
         )
 
+        raise NotImplementedError
+
     def forward(self, x):
         out = self.fc1_bn(x)
         out = self.fc2_bn(out)
@@ -81,16 +83,13 @@ class Decoder(nn.Module):
 
 class AutoEncoder(pl.LightningModule):
 
-    def __init__(self, points_per_cloud, in_channels, bneck_size, loss='chamfer'):
+    def __init__(self):
         super().__init__()
 
-        self.points_per_cloud = points_per_cloud
-        self.in_channels = in_channels
-        self.bneck_size = bneck_size
-        self.loss = loss.lower()
+        raise NotImplementedError
 
-        self.encoder = Encoder(in_channels, bneck_size, points_per_cloud)
-        self.decoder = Decoder(bneck_size, in_channels*points_per_cloud)
+        self.encoder = Encoder()
+        self.decoder = Decoder()
 
     def forward(self, x):
         embedding = self.encoder(x)
