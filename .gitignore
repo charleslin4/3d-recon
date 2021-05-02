@@ -2,4 +2,4 @@ data/*
 env/*
 wandb/*
 lightning_logs/*
-*/__pycache__/*
+*.pyc
