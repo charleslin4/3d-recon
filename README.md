@@ -4,3 +4,4 @@
 * `torch==1.7.0`
 * `pytorch-lightning==1.2.7`
 * `pytorch3d==0.4.0`
+* `wandb==0.10.27`
