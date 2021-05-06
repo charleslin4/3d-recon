@@ -5,15 +5,14 @@ from pytorch3d.loss import chamfer
 import pytorch3d.ops as ops 
 import wandb
 import torchvision.models as models
+from pytorch3d.ops import sample_points_from_meshes
+from pytorch3d.utils import ico_sphere
 
 class Encoder(nn.Module):
 
     def __init__(self):
         super(Encoder, self).__init__()
         self.resnet50 = models.resnet50(pretrained=True, progress=True)
-        self.resnet50.fc = nn.Linear(in_features=2048, out_features=5*5, bias=True)
-        
-        raise NotImplementedError
 
     def forward(self, x):
         out = self.resnet50(x)
@@ -50,18 +49,16 @@ class Decoder(nn.Module):
             nn.Sigmoid()
         )
 
-        raise NotImplementedError
-
     def forward(self, x):
-        N, C, H, W = x.shape
-        verts = x.transpose(0, 2, 3, 1).reshape(N, H*W, C)
-        out = ops.vert_align(feats=x, verts=verts)
+        src_mesh = ico_sphere(4, device=None)
+        points = sample_points_from_meshes(src_mesh, 10000)
+        out = ops.vert_align(feats=x, verts=points)
         out = self.fc1(out)
         out = self.fc2(out)
-        out = self.fc3_points(out)
-        #out = self.fc3_textures(out)
+        out_points = self.fc3_points(out)
+        out_textures = self.fc3_textures(out)
         
-        return out
+        return out_points, out_textures
 
 
 class AutoEncoder(pl.LightningModule):
