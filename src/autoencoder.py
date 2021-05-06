@@ -2,81 +2,64 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 from pytorch3d.loss import chamfer
+import pytorch3d.ops as ops 
 import wandb
+import torchvision.models as models
 
 class Encoder(nn.Module):
 
-    def __init__(self, in_channels, out_channels, points_per_cloud):
+    def __init__(self):
         super(Encoder, self).__init__()
+        self.resnet50 = models.resnet50(pretrained=True, progress=True)
+        self.resnet50.fc = nn.Linear(in_features=2048, out_features=5*5, bias=True)
         
-        self.conv1_bn = nn.Sequential(
-            nn.Conv1d(in_channels=in_channels, out_channels=64, kernel_size=1, stride=1),
-            nn.BatchNorm1d(64),
-            nn.ReLU()
-        )
-
-        self.conv2_bn = nn.Sequential(
-            nn.Conv1d(in_channels=64, out_channels=128, kernel_size=1, stride=1),
-            nn.BatchNorm1d(128),
-            nn.ReLU()
-        )
-
-        self.conv3_bn = nn.Sequential(
-            nn.Conv1d(in_channels=128, out_channels=128, kernel_size=1, stride=1),
-            nn.BatchNorm1d(128),
-            nn.ReLU()
-        )
-
-        self.conv4_bn = nn.Sequential(
-            nn.Conv1d(in_channels=128, out_channels=256, kernel_size=1, stride=1),
-            nn.BatchNorm1d(256),
-            nn.ReLU()
-        )
-
-        self.conv5_bn = nn.Sequential(
-            nn.Conv1d(in_channels=256, out_channels=out_channels, kernel_size=1, stride=1),
-            nn.BatchNorm1d(out_channels),
-            nn.ReLU()
-        )
-
         raise NotImplementedError
 
     def forward(self, x):
-        out = self.conv1_bn(x)
-        out = self.conv2_bn(out)
-        out = self.conv3_bn(out)
-        out = self.conv4_bn(out)
-        out = self.conv5_bn(out)
-        out, _ = torch.max(out, 2)
+        out = self.resnet50(x)
 
         return out
 
 
 class Decoder(nn.Module):
 
-    def __init__(self, in_channels, out_channels):
+    def __init__(self):
         super(Decoder, self).__init__()
+        
+        self.fc1 = nn.Sequential(
+            nn.Linear(2048, 512),
+            nn.ReLU()
+        )
+        
+        self.fc2 = nn.Sequential(
+            nn.Linear(512, 512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            nn.ReLU()
+        )
 
-        self.fc1_bn = nn.Sequential(
-            nn.Linear(in_channels, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU()
+        self.fc3_points = nn.Sequential(
+            nn.Linear(512, 3),
+            nn.Tanh()
         )
-        self.fc2_bn = nn.Sequential(
-            nn.Linear(128, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU()
-        )
-        self.fc3 = nn.Sequential(
-            nn.Linear(128, out_channels)
+
+        self.fc3_textures = nn.Sequential(
+            nn.Linear(512, 3),
+            nn.Sigmoid()
         )
 
         raise NotImplementedError
 
     def forward(self, x):
-        out = self.fc1_bn(x)
-        out = self.fc2_bn(out)
-        out = self.fc3(out)
+        N, C, H, W = x.shape
+        verts = x.transpose(0, 2, 3, 1).reshape(N, H*W, C)
+        out = ops.vert_align(feats=x, verts=verts)
+        out = self.fc1(out)
+        out = self.fc2(out)
+        out = self.fc3_points(out)
+        #out = self.fc3_textures(out)
         
         return out
 
@@ -85,9 +68,6 @@ class AutoEncoder(pl.LightningModule):
 
     def __init__(self):
         super().__init__()
-
-        raise NotImplementedError
-
         self.encoder = Encoder()
         self.decoder = Decoder()
 
