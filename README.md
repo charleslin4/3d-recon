@@ -3,7 +3,6 @@
 ## Dependencies
 * `torch==1.7.1`
 * `torchvision==0.8.2`
-* `pytorch-lightning==1.2.7`
 * `pytorch3d==0.4.0`
 * `wandb`
 
