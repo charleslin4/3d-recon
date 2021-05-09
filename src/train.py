@@ -21,20 +21,8 @@ from pytorch3d.renderer import (
 )
 
 import wandb
-
 from autoencoder import AutoEncoder
 
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--seed', default=321)
-parser.add_argument('--data_dir', type=str, default='/home/data')
-parser.add_argument('--bs', default=8)
-parser.add_argument('--epochs', default=1)
-args = parser.parse_args()
-
-random.seed(args.seed)
-np.random.seed(args.seed)
-torch.manual_seed(args.seed)
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -48,14 +36,13 @@ def render_points(point_clouds, R, T, K):
         compositor=AlphaCompositor()
     )
 
-    # TODO 
     images = renderer(point_clouds, cameras=camera, lights=PointLights())  # (N, H, W, C)
     silhouettes = 1. - (1 - images).prod(dim=-1)
     images = images.permute(0, 3, 1, 2)  # (N, C, H, W)
     return images, silhouettes
 
 
-def train():
+def train(args):
     synsets = ['cabinet']  # use one synset for easy prototyping
     shapenet_path = os.path.join(args.data_dir, 'ShapeNet/ShapeNetCore.v1')
     r2n2_path = os.path.join(args.data_dir, 'ShapeNet')
@@ -151,6 +138,17 @@ def train():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--seed', default=321)
+    parser.add_argument('--data_dir', type=str, default='/home/data')
+    parser.add_argument('--bs', default=8)
+    parser.add_argument('--epochs', default=1)
+    args = parser.parse_args()
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+
     wandb.init(project='3d-recon', entity='3drecon2')
-    train()
+    train(args)
 

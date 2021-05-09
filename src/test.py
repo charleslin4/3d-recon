@@ -1,7 +1,5 @@
 import os
 import argparse
-import utils
-import options
 import numpy as np
 
 import torch
@@ -10,40 +8,42 @@ from pytorch3d.datasets import R2N2, collate_batched_R2N2
 from pytorch3d.structures import Meshes, Pointclouds
 from pytorch3d.loss import chamfer
 from pytorch3d.ops import sample_points_from_meshes
-import wandb
 
 from autoencoder import AutoEncoder
-from options import *
 from train import render_points
 
-def compute_min_cd(x_gt, pc_set):
+DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+POINT_CLOUD_SIZE = 10000
+
+
+def compute_min_cd(pc_set, x_gt):
     '''
     Computes the minimum Chamfer Distance (CD) between a ground truth
     point cloud and a set of generated point clouds.
 
     Input:
+        pc_set: a list of Pointcloud objects
         x_gt: a single Pointcloud object
-        pc_set: list of 24 Pointcloud objects
 
     Returns:
         minimum Chamfer Distance
     '''
-    cds = []
-    for x in pc_set:
-        cd = chamfer.chamfer_distance(x_gt, x)[0]
-        cds.append(cd[0].item())
-    return np.min(cds)
+
+    num_samples = pc_set._N
+    x_gt_set = x_gt.repeat(num_samples, 1, 1)  # reshape into (N, P, D)
+    cds, _ = chamfer.chamfer_distance(pc_set, x_gt_set, batch_reduction=None)
+    min_cd = cds.min()
+    return min_cd
+
 
 def compute_mean_iou():
     pass
 
-def test():
-    print('===========================================================')
-    print('============ Evaluate 3D Point Cloud Generation ===========')
-    print('===========================================================')
 
-    # Parse arguments
-    args = options.get_arguments()
+def evaluate():
+    print('============================================================')
+    print('============ Evaluate 3D Point Cloud Generation ============')
+    print('============================================================')
 
     # Load test data
     shapenet_path = os.path.join(args.data_dir, 'ShapeNet/ShapeNetCore.v1')
@@ -52,17 +52,17 @@ def test():
     test_set = R2N2("val", shapenet_path, r2n2_path, r2n2_splits, return_voxels=False)
 
     # Set path to save 3D point clouds
-    results_dir = args.results_dir + '/{args.model}_{args.name}'
+    results_dir = os.path.join(args.results_dir, f'{args.model}_{args.name}')
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
     
     # Initialize & load models
     if args.model == 'baseline':
-        from .autoencoder import AutoEncoder
-        model = AutoEncoder().to(DEVICE) # add AE arguments here
+        model = AutoEncoder().to(DEVICE)
     elif args.model == 'vq-vae':
         # ADD IMPORT STATEMENT FOR VQ-VAE
         # model = 
+        pass
     else:
         raise ValueError("Model [%s] not recognized." % args.model)
     if args.load_dir is not None:
@@ -71,21 +71,20 @@ def test():
     model.eval()
     
     with torch.no_grad():
-        test_loader = DataLoader(test_set, batch_size=args.bs, shuffle=False, collate_fn=collate_batched_R2N2)
-        min_cds = np.zeros(len(test_loader), args.bs)
+        test_loader = DataLoader(test_set, batch_size=1, shuffle=False, collate_fn=collate_batched_R2N2)
+        total_min_cd = 0.0
+        count = 0
         for batch_idx, batch in enumerate(test_loader):
-            images = batch['images']
-            batch_size, n_views = images.shape[0], images.shape[1]
-            idx = np.asarray([np.random.choice(n_views, 2, replace=False) for i in range(batch_size)])
-            input_idx, support_idx = idx[:, 0], idx[:, 1]
+            images = batch['images'].squeeze(0).to(DEVICE)  # (N, H, W, C)
+            masks = 1. - (1 - images).prod(dim=-1)
+            images = images.permute(0, 3, 1, 2)             # (N, C, H, W)
 
-            input_images = images[range(batch_size), input_idx].to(DEVICE)      # (N, H, W, C)
-            input_masks = 1. - (1 - input_images).prod(dim=-1)
-            input_images = input_images.permute(0, 3, 1, 2)      # (N, C, H, W)
+            n_views = images.shape[1]
 
-            points, textures = model(input_images)
-            point_clouds = Pointclouds(points, features=textures)
+            points, textures = model(images)
+            point_clouds = Pointclouds(points, textures)
 
+            '''
             R, T, K = batch['R'], batch['T'], batch['K']
             out_images, out_masks = render_points(
                 point_clouds,
@@ -93,22 +92,39 @@ def test():
                 T[range(batch_size), input_idx],
                 K[range(batch_size), input_idx]
             )
+            '''
 
             meshes_gt = batch['mesh']
-            for i in range(batch_size):
-                point_cloud_gt = sample_points_from_meshes(
-                    meshes_gt[i],
-                    num_samples=POINT_CLOUD_SIZE
-                )
-                min_cds[batch_idx, i] = compute_min_cd(point_clouds, point_cloud_gt)
-    
-            wandb.log({
-                'images/input_gt': wandb.Image(input_images[0]),
-                'images/input_recon': wandb.Image(out_images[0]),
-                'pt_cloud': wandb.Object3D(point_clouds._points_padded[0].detach().cpu().numpy())
-                })
-        print("Mean Min Chamfer Distance: %f", min_cds.mean())
+            point_clouds_gt = sample_points_from_meshes(
+                meshes_gt,
+                num_samples=POINT_CLOUD_SIZE
+            ).to(DEVICE)
+            min_cd = compute_min_cd(point_clouds, point_clouds_gt)
+
+            # TODO calculate F1 scores
+            # TODO periodically save generated point clouds
+
+            print('Step {}\tMinimum CD: {:.2f}'.format(
+                    batch_idx, min_cd))
+            # TODO write to a log file
+
+            total_min_cd += min_cd
+            count += 1
+
+        print(f"Mean Min Chamfer Distance: {total_min_cd / count}")
+
 
 if __name__ == "__main__":
-    wandb.init(project='3d-recon', entity='3drecon2')
-    test()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model', type=str, default='baseline', help='baseline or vq-vae')
+    parser.add_argument('--name', type=str, default='0', help='name of experiment')
+    parser.add_argument('--bs', type=int, default=8, help='batch size')
+    parser.add_argument('--data_dir', type=str, default='/home/data')
+
+    # Options for testing
+    parser.add_argument('--load_dir', type=str, default=None)
+    parser.add_argument('--results_dir', type=str, default='./eval', help='path to save results to')
+    args = parser.parse_args()
+
+    evaluate()

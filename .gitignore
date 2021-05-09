@@ -1,5 +1,5 @@
 data/*
 env/*
 wandb/*
-lightning_logs/*
+eval/*
 *.pyc
