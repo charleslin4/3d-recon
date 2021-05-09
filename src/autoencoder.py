@@ -81,9 +81,10 @@ class Decoder(nn.Module):
         out = vert_align(feats=x, verts=points)
         out = self.fc1(out)
         out = self.fc2(out)
-        out_points = self.fc3_points(out)
+        point_diffs = self.fc3_points(out)
         out_textures = self.fc3_textures(out)
 
+        out_points = points - point_diffs
         return out_points, out_textures  # At the moment, returning a Pointclouds object will create an infinite loop
 
 
