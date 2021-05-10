@@ -22,6 +22,7 @@ from pytorch3d.renderer import (
 
 import wandb
 from autoencoder import AutoEncoder
+from utils import save_checkpoint_model
 
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -55,12 +56,14 @@ def train(args):
     opt = torch.optim.Adam(ae.parameters(), lr=1e-4)
     wandb.watch(ae, log='all')
 
+    iter = 0
     for epoch in range(args.epochs):
         train_loader = DataLoader(train_set, batch_size=args.bs, shuffle=False, collate_fn=collate_batched_R2N2)
         val_loader = DataLoader(val_set, batch_size=args.bs, shuffle=False, collate_fn=collate_batched_R2N2)
 
         try:
             for batch_idx, batch in enumerate(train_loader):
+                iter += args.bs
                 opt.zero_grad()
                 ae.train()
 
@@ -132,6 +135,10 @@ def train(args):
                     'pt_cloud': wandb.Object3D(point_clouds._points_padded[0].detach().cpu().numpy())
                 })
 
+                if iter % args.save_freq == 0:
+                    print('Saving the latest model (epoch %d, total_steps %d)' % (epoch, total_steps))
+                    save_checkpoint_model(model, args.model_name, epoch, loss, args.checkpoint_dir, iters)
+
         except Exception as e:
             print(e)
             breakpoint()
@@ -143,6 +150,9 @@ if __name__ == "__main__":
     parser.add_argument('--data_dir', type=str, default='/home/data')
     parser.add_argument('--bs', default=8)
     parser.add_argument('--epochs', default=1)
+    parser.add_argument('--save_freq', default=8)
+    parser.add_argument('--model_name', type=str, default='baseline')
+    parser.add_argument('--checkpoint_dir', type=str, default='/home/checkpoints')
     args = parser.parse_args()
 
     random.seed(args.seed)
