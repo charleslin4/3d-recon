@@ -43,10 +43,9 @@ def render_points(point_clouds, R, T, K):
 
 
 def train(args):
-    synsets = ['cabinet']  # use one synset for easy prototyping
     shapenet_path = os.path.join(args.data_dir, 'ShapeNet/ShapeNetCore.v1')
     r2n2_path = os.path.join(args.data_dir, 'ShapeNet')
-    r2n2_splits = os.path.join(args.data_dir, 'ShapeNet/ShapeNetRendering/pix2mesh_splits_val05.json')
+    r2n2_splits = os.path.join('./data/bench_splits.json')
 
     train_set = R2N2("train", shapenet_path, r2n2_path, r2n2_splits, return_voxels=False)
     val_set = R2N2("val", shapenet_path, r2n2_path, r2n2_splits, return_voxels=False)

@@ -3,3 +3,5 @@ env/*
 wandb/*
 eval/*
 *.pyc
+
+!data/bench_splits.json
