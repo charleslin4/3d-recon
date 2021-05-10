@@ -55,12 +55,14 @@ def train(args):
     opt = torch.optim.Adam(ae.parameters(), lr=1e-4)
     wandb.watch(ae, log_freq=25)
 
-    iter = 0
+    total_iters = 0
     for epoch in range(args.epochs):
         train_loader = DataLoader(train_set, batch_size=args.bs, shuffle=False, collate_fn=collate_fn)
         val_loader = DataLoader(val_set, batch_size=args.bs, shuffle=False, collate_fn=collate_fn)
 
         for batch_idx, batch in enumerate(train_loader):
+            total_iters += args.bs
+            
             opt.zero_grad()
             ae.train()
 
@@ -132,9 +134,9 @@ def train(args):
                 'pt_cloud': wandb.Object3D(point_clouds._points_padded[0].detach().cpu().numpy())
             })
             
-            if iter % args.save_freq == 0:
-                print('Saving the latest model (epoch %d, total_steps %d)' % (epoch, total_steps))
-                save_checkpoint_model(model, args.model_name, epoch, loss, args.checkpoint_dir, iters)
+            if total_iters % args.save_freq == 0:
+                print('Saving the latest model (epoch %d, total_iters %d)' % (epoch, total_iters))
+                save_checkpoint_model(model, args.model_name, epoch, loss, args.checkpoint_dir, total_iters)
 
 
 if __name__ == "__main__":

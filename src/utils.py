@@ -2,8 +2,8 @@ import os
 import torch
 from autoencoder import AutoEncoder
 
-def save_checkpoint_model(model, model_name, epoch, loss, checkpoint_dir, iters):
-    save_filename = '%s_model_%s.pth' % (model_name, iters)
+def save_checkpoint_model(model, model_name, epoch, loss, checkpoint_dir, total_iters):
+    save_filename = '%s_model_%s.pth' % (model_name, total_iters)
     save_path = os.path.join(checkpoint_dir, save_filename)
     torch.save({
         'epoch': epoch,
