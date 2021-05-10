@@ -7,11 +7,9 @@ def save_checkpoint_model(model, model_name, epoch, loss, checkpoint_dir, total_
     save_path = os.path.join(checkpoint_dir, save_filename)
     torch.save({
         'epoch': epoch,
-        'model_state_dict': model.cpu().state_dict(),
+        'model_state_dict': model.state_dict(),
         'loss': loss,
     }, save_path)
-    if torch.cuda.is_available():
-        model.cuda()
 
 snc_synth_id_to_category = {
     '02691156': 'airplane',  '02773838': 'bag',        '02801938': 'basket',
