@@ -77,5 +77,16 @@ def project_verts(verts, P, eps=1e-1):
     return verts_proj
 
 
+def save_point_clouds(obj_file, img_file, img_gt_file, pc_padded, img, img_gt):
+    torch.save(pc_padded, obj_file)
+    imageio.imsave(img_file, format_image(img))
+    imageio.imsave(img_gt_file, format_image(img_gt))
+
+
+def format_image(images):
+    return (255. * images).detach().cpu().numpy().clip(0, 255).astype('uint8').transpose(1, 2, 0)
+
+
 if __name__ == '__main__':
     sample_points_from_sphere(clouds=1, points_per_cloud=10000, save_path='./data/point_sphere.pt')
+
