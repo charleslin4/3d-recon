@@ -1,5 +1,8 @@
 import os
 import torch
+import imageio
+import numpy
+
 from autoencoder import AutoEncoder
 
 def save_checkpoint_model(model, model_name, epoch, loss, checkpoint_dir, total_iters):
@@ -10,6 +13,11 @@ def save_checkpoint_model(model, model_name, epoch, loss, checkpoint_dir, total_
         'model_state_dict': model.state_dict(),
         'loss': loss,
     }, save_path)
+
+def save_point_clouds(obj_file, img_file, img_gt_file, pc_padded, img, img_gt):
+    torch.save(pc_padded, obj_file)
+    imageio.imsave(img_file, img)
+    imageio.imsave(img_gt_file, img_gt)
 
 snc_synth_id_to_category = {
     '02691156': 'airplane',  '02773838': 'bag',        '02801938': 'basket',
