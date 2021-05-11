@@ -16,8 +16,11 @@ def save_checkpoint_model(model, model_name, epoch, loss, checkpoint_dir, total_
 
 def save_point_clouds(obj_file, img_file, img_gt_file, pc_padded, img, img_gt):
     torch.save(pc_padded, obj_file)
-    imageio.imsave(img_file, img)
-    imageio.imsave(img_gt_file, img_gt)
+    imageio.imsave(img_file, format_image(img))
+    imageio.imsave(img_gt_file, format_image(img_gt))
+
+def format_image(images):
+    return (255. * images).detach().cpu().numpy().clip(0, 255).astype('uint8').transpose(1, 2, 0)
 
 snc_synth_id_to_category = {
     '02691156': 'airplane',  '02773838': 'bag',        '02801938': 'basket',
