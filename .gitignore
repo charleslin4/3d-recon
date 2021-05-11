@@ -1,7 +1,9 @@
 data/*
 env/*
 wandb/*
+src/wandb/*
 eval/*
+checkpoints/*
 *.pyc
 
 !data/bench_splits.json

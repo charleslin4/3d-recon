@@ -13,47 +13,72 @@ from pytorch3d.utils import ico_sphere
 from pytorch3d.renderer import (
     FoVOrthographicCameras,
     PointsRasterizationSettings,
+    RasterizationSettings,
     PointsRasterizer,
     PointsRenderer,
     PointLights,
-    NormWeightedCompositor
+    AlphaCompositor,
+    NormWeightedCompositor,
 )
 from data_process import collate_fn
 
 import wandb
-from autoencoder import AutoEncoder
+from pointalign import PointAlign
 from utils import save_checkpoint_model
 
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+sigma = 1e-4
 
-def render_points(point_clouds, R, T, K):
+def render_points(points, textures, R, T, K):
+    raw_ptclds = Pointclouds(points, features=torch.ones((points.shape[0], points.shape[1], 1), device=DEVICE))
+    textured_ptclds = Pointclouds(points, features=textures)
+
     camera = BlenderCamera(device=DEVICE, R=R, T=T, K=K)
-    renderer = PointsRenderer(
-        rasterizer=PointsRasterizer(
-            cameras=camera, 
-            raster_settings=PointsRasterizationSettings(image_size=137)
-        ),
-        compositor=NormWeightedCompositor()
+    raster_settings = PointsRasterizationSettings(
+        image_size=137,
+        radius = 0.01,
+        points_per_pixel = 10
     )
+    rasterizer = PointsRasterizer(
+        cameras=camera,
+        raster_settings=raster_settings
+    )
+    compositor = AlphaCompositor()
 
-    images = renderer(point_clouds, cameras=camera, lights=PointLights())  # (N, H, W, C)
-    silhouettes = 1. - (1 - images).prod(dim=-1)
-    images = images.permute(0, 3, 1, 2)  # (N, C, H, W)
+    textured_fragments = rasterizer(textured_ptclds)
+    textured_probs = (-textured_fragments.dists / sigma).sigmoid()
+    images = compositor(
+        textured_fragments.idx.long().permute(0, 3, 1, 2),
+        textured_probs.permute(0, 3, 1, 2),
+        textured_ptclds.features_packed().permute(1, 0)
+    )  # (N, C, H, W)
+
+    raw_fragments = rasterizer(raw_ptclds)
+    raw_probs = (-raw_fragments.dists / sigma).sigmoid()
+    silhouettes = compositor(
+        raw_fragments.idx.long().permute(0, 3, 1, 2),
+        raw_probs.permute(0, 3, 1, 2),
+        raw_ptclds.features_packed().permute(1, 0)
+    ).squeeze(1)
+    # probs = (-fragments.dists).sigmoid()
+    # silhouettes = 1. - (1. - raw_probs).prod(dim=-1)  # (N, H, W)
+    print(silhouettes.sum().item())
+
     return images, silhouettes
 
 
 def train(args):
     shapenet_path = os.path.join(args.data_dir, 'ShapeNet/ShapeNetCore.v1')
     r2n2_path = os.path.join(args.data_dir, 'ShapeNet')
-    r2n2_splits = os.path.join('./data/bench_splits.json')
+    r2n2_splits = os.path.join(args.data_dir, 'bench_splits.json')
 
     train_set = R2N2("train", shapenet_path, r2n2_path, r2n2_splits, return_voxels=False, load_textures=False)
     val_set = R2N2("val", shapenet_path, r2n2_path, r2n2_splits, return_voxels=False, load_textures=False)
 
-    ae = AutoEncoder().to(DEVICE)
+    ae = PointAlign().to(DEVICE)
     opt = torch.optim.Adam(ae.parameters(), lr=1e-4)
-    wandb.watch(ae, log_freq=25)
+    wandb.watch(ae, log_freq=1)
 
     total_iters = 0
     for epoch in range(args.epochs):
@@ -73,24 +98,27 @@ def train(args):
 
             input_images = images[range(batch_size), input_idx].to(DEVICE)      # (N, H, W, C)
             support_images = images[range(batch_size), support_idx].to(DEVICE)  # (N, H, W, C)
-            input_masks = 1. - (1 - input_images).prod(dim=-1)
-            support_masks = 1. - (1 - support_images).prod(dim=-1)
+            # input_masks = 1. - (1 - input_images).prod(dim=-1)
+            # support_masks = 1. - (1 - support_images).prod(dim=-1)
+            input_masks = (input_images != 0).all(-1).float()
+            support_masks = (support_images != 0).all(-1).float()
             input_images = input_images.permute(0, 3, 1, 2)      # (N, C, H, W)
             support_images = support_images.permute(0, 3, 1, 2)  # (N, C, H, W)
 
-            points, textures = ae(input_images)
-            point_clouds = Pointclouds(points, features=textures)
+            R, T, K = batch['R'].to(DEVICE), batch['T'].to(DEVICE), batch['K'].to(DEVICE)
+            points, textures = ae(input_images, K[range(batch_size), input_idx])
 
-            R, T, K = batch['R'], batch['T'], batch['K']
             out_images, out_masks = render_points(
-                point_clouds,
+                points,
+                textures,
                 R[range(batch_size), input_idx],
                 T[range(batch_size), input_idx],
                 K[range(batch_size), input_idx]
             )
 
             out_support_images, out_support_masks = render_points(
-                point_clouds,
+                points,
+                textures,
                 R[range(batch_size), support_idx],
                 T[range(batch_size), support_idx],
                 K[range(batch_size), support_idx]
@@ -100,21 +128,21 @@ def train(args):
                 1. - (input_masks * out_masks).sum(dim=(1,2)) / ((input_masks + out_masks - input_masks * out_masks).sum(dim=(1,2)))
             ).mean()
             l_base_l1 = F.l1_loss(input_images, out_images)
-            l_base = l_base_mask + l_base_l1
+            l_base = l_base_mask + 0.01 * l_base_l1
 
             l_support_mask = (
                 1. - (support_masks * out_support_masks).sum(dim=(1,2)) / ((support_masks + out_support_masks - support_masks * out_support_masks).sum(dim=(1,2)))
             ).mean()
             l_support_l1 = F.l1_loss(support_images, out_support_images)
-            l_support = l_support_mask + l_support_l1
+            l_support = l_support_mask + 0.01 * l_support_l1
 
             loss = l_base + l_support
             loss.backward()
             opt.step()
 
-            print("Training step {}\tLoss: {:.2f}\tBase mask loss: {:.2f}\tL1 mask loss: {:.2f}\t"
+            print("Epoch {}\tTrain step {}\tLoss: {:.2f}\tBase mask loss: {:.2f}\tBase L1 loss: {:.2f}\t"
                 "Support mask loss: {:.2f}\tSupport L1 loss: {:.2f}".format(
-                    batch_idx, loss, l_base_mask, l_base_l1, l_support_mask, l_support_l1
+                    epoch, batch_idx, loss, l_base_mask, l_base_l1, l_support_mask, l_support_l1
             ))
 
             wandb.log({
@@ -131,12 +159,12 @@ def train(args):
                 'masks/input_recon': wandb.Image(out_masks[0]),
                 'masks/support_gt': wandb.Image(support_masks[0]),
                 'masks/support_recon': wandb.Image(out_support_masks[0]),
-                'pt_cloud': wandb.Object3D(point_clouds._points_padded[0].detach().cpu().numpy())
+                'pt_cloud': wandb.Object3D(points[0].detach().cpu().numpy())
             })
             
             if total_iters % args.save_freq == 0:
                 print('Saving the latest model (epoch %d, total_iters %d)' % (epoch, total_iters))
-                save_checkpoint_model(model, args.model_name, epoch, loss, args.checkpoint_dir, total_iters)
+                save_checkpoint_model(ae, args.model_name, epoch, loss, args.checkpoint_dir, total_iters)
 
 
 if __name__ == "__main__":
@@ -145,7 +173,7 @@ if __name__ == "__main__":
     parser.add_argument('--data_dir', type=str, default='/home/data')
     parser.add_argument('--bs', type=int, default=8)
     parser.add_argument('--epochs', type=int, default=1)
-    parser.add_argument('--save_freq', type=int, default=8)
+    parser.add_argument('--save_freq', type=int, default=500)
     parser.add_argument('--model_name', type=str, default='baseline')
     parser.add_argument('--checkpoint_dir', type=str, default='/home/checkpoints')
     args = parser.parse_args()
