@@ -27,7 +27,7 @@ class MeshPCDataset(Dataset):
         return_id_str=False,
     ):
 
-        super(MeshPCDataset, self).__init__()
+        super().__init__()
         if not return_mesh and sample_online:
             raise ValueError("Cannot sample online without returning mesh")
         self.data_dir = data_dir
@@ -126,12 +126,12 @@ class MeshPCDataset(Dataset):
             normals = normals.mm(RT[:3, :3].t())  # Only rotate, don't translate
 
         id_str = "%s-%s-%02d" % (sid, mid, iid)
-        return img, verts, faces, points, normals, id_str
+        return img, verts, faces, points, normals, RT, K, id_str
 
 
     @staticmethod
     def collate_fn(batch):
-        imgs, verts, faces, points, normals, id_strs = zip(*batch)
+        imgs, verts, faces, points, normals, RT, K, id_strs = zip(*batch)
         imgs = torch.stack(imgs, dim=0)
         if verts[0] is not None and faces[0] is not None:
             # TODO(gkioxari) Meshes should accept tuples
@@ -143,13 +143,13 @@ class MeshPCDataset(Dataset):
             normals = torch.stack(normals, dim=0)
         else:
             points, normals = None, None
-        return imgs, meshes, points, normals, id_strs
+        return imgs, meshes, points, normals, RT, K, id_strs
 
 
     def postprocess(self, batch, device=None):
         if device is None:
             device = torch.device("cuda")
-        imgs, meshes, points, normals, id_strs = batch
+        imgs, meshes, points, normals, RT, K, id_strs = batch
         imgs = imgs.to(device)
         if meshes is not None:
             meshes = meshes.to(device)
@@ -162,6 +162,6 @@ class MeshPCDataset(Dataset):
             )
 
         if self.return_id_str:
-            return imgs, meshes, points, normals, id_strs
+            return imgs, meshes, points, normals, RT, K, id_strs
         else:
-            return imgs, meshes, points, normals
+            return imgs, meshes, points, normals, RT, K
