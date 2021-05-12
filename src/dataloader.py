@@ -5,7 +5,7 @@ from fvcore.common.file_io import PathManager
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, Subset
 from torch.utils.data.distributed import DistributedSampler
 
-from src.dataset import MeshPCDataset
+from dataset import MeshPCDataset
 
 logger = logging.getLogger(__name__)
 

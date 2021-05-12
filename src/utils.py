@@ -271,6 +271,30 @@ def get_blender_intrinsic_matrix(N=None):
         K = K.view(1, 4, 4).expand(N, 4, 4)
     return K
 
+def rotate_verts(RT, verts):
+    """
+    Inputs:
+    - RT: (N, 4, 4) array of extrinsic matrices
+    - verts: (N, V, 3) array of vertex positions
+    """
+    singleton = False
+    if RT.dim() == 2:
+        assert verts.dim() == 2
+        RT, verts = RT[None], verts[None]
+        singleton = True
+
+    if isinstance(verts, list):
+        verts_rot = []
+        for i, v in enumerate(verts):
+            verts_rot.append(rotate_verts(RT[i], v))
+        return verts_rot
+
+    R = RT[:, :3, :3]
+    verts_rot = verts.bmm(R.transpose(1, 2))
+    if singleton:
+        verts_rot = verts_rot[0]
+    return verts_rot
+
 
 def save_point_clouds(obj_file, img_fil_img_gt_file, pc_padded, img, img_gt):
     torch.save(pc_padded, obj_file)

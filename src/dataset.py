@@ -9,7 +9,7 @@ from torch.utils.data import Dataset
 
 import torchvision.transforms as T
 from PIL import Image
-from src.utils import imagenet_preprocess, project_verts
+from utils import imagenet_preprocess, project_verts
 
 logger = logging.getLogger(__name__)
 
@@ -160,8 +160,13 @@ class MeshPCDataset(Dataset):
             points, normals = sample_points_from_meshes(
                 meshes, num_samples=self.num_samples, return_normals=True
             )
+        if RT is not None:
+            RT = torch.stack(RT, 0).to(device)
+        if K is not None:
+            K = torch.stack(K, 0).to(device)
 
         if self.return_id_str:
             return imgs, meshes, points, normals, RT, K, id_strs
         else:
             return imgs, meshes, points, normals, RT, K
+
