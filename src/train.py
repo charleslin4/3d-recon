@@ -20,9 +20,8 @@ def train(args):
 
     ae = PointAlign().to(DEVICE)
     opt = torch.optim.Adam(ae.parameters(), lr=1e-3)
-    wandb.watch(ae, log_freq=1)
 
-    total_iters = 0
+    global_iter = 0
     for epoch in range(args.epochs):
 
         train_loader = build_data_loader(
@@ -37,8 +36,8 @@ def train(args):
         )
 
         for batch_idx, batch in enumerate(train_loader):
-            total_iters += args.bs
-            
+            global_iter += 1
+
             images, _, ptclds_gt, normals, RT, K = train_loader.postprocess(batch)
             opt.zero_grad()
             ae.train()
@@ -52,13 +51,17 @@ def train(args):
             print("Epoch {}\tTrain step {}\tLoss: {:.2f}".format(epoch, batch_idx, loss))
             wandb.log({
                 'loss': loss,
-                'pt_cloud/pred': wandb.Object3D(ptclds_pred[0].detach().cpu().numpy()),
-                'pt_cloud/gt': wandb.Object3D(ptclds_gt_cam[0].detach().cpu().numpy())
-            })
+           })
+            
+            if batch_idx % 100 == 0:
+                wandb.log({
+                    'pt_cloud/pred': wandb.Object3D(ptclds_pred[0].detach().cpu().numpy()),
+                    'pt_cloud/gt': wandb.Object3D(ptclds_gt_cam[0].detach().cpu().numpy())
+                })
 
-            if total_iters % args.save_freq == 0:
-                print('Saving the latest model (epoch %d, total_iters %d)' % (epoch, total_iters))
-                save_checkpoint_model(ae, args.model_name, epoch, loss, args.checkpoint_dir, total_iters)
+            if global_iter % args.save_freq == 0:
+                print('Saving the latest model (epoch %d, global_iter %d)' % (epoch, global_iter))
+                save_checkpoint_model(ae, args.model_name, epoch, loss, args.checkpoint_dir, global_iter)
 
 
 if __name__ == "__main__":

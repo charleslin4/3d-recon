@@ -162,9 +162,9 @@ class MeshPCDataset(Dataset):
                 meshes, num_samples=self.num_samples, return_normals=True
             )
         if RT is not None:
-            RT = [rt.to(device) for rt in RT]
+            RT = torch.stack(RT, 0).to(device)
         if K is not None:
-            K = [k.to(device) for k in K]
+            K = torch.stack(K, 0).to(device)
 
         if self.return_id_str:
             return imgs, meshes, points, normals, RT, K, id_strs
