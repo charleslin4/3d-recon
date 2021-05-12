@@ -5,7 +5,16 @@ import numpy as np
 
 import torch
 from torch.utils.data import DataLoader
+import torchvision.transforms as T
 from pytorch3d.datasets import R2N2
+
+
+IMAGENET_MEAN = [0.485, 0.456, 0.406]
+IMAGENET_STD = [0.229, 0.224, 0.225]
+
+def imagenet_preprocess():
+    return T.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
+
 
 def collate_fn(batch):
     if batch is None or len(batch) == 0:

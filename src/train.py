@@ -13,14 +13,13 @@ from pointalign import PointAlign
 from dataloader import build_data_loader
 from utils import save_checkpoint_model, rotate_verts
 
-
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
 def train(args):
 
     ae = PointAlign().to(DEVICE)
-    opt = torch.optim.Adam(ae.parameters(), lr=1e-4)
+    opt = torch.optim.Adam(ae.parameters(), lr=1e-3)
     wandb.watch(ae, log_freq=1)
 
     total_iters = 0

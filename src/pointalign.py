@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import torchvision
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 
+from pytorch3d.datasets.r2n2.utils import project_verts
 from pytorch3d.structures import Pointclouds
 from pytorch3d.ops import vert_align
 
@@ -12,34 +13,6 @@ import utils
 from backbone import build_backbone
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-
-def resnet_backbone(
-    backbone_name,
-    pretrained,
-    norm_layer=torchvision.ops.misc.FrozenBatchNorm2d,
-    trainable_layers=3,
-    returned_layers=None,
-    extra_blocks=None
-):
-
-    fpn_backbone = resnet_fpn_backbone(backbone_name, pretrained, norm_layer, trainable_layers, returned_layers, extra_blocks)
-    modules = list(fpn_backbone.children())[:-1]
-    backbone = nn.Sequential(*modules)
-    return backbone
-
-
-class Encoder(nn.Module):
-
-    def __init__(self):
-        super(Encoder, self).__init__()
-
-        self.model = resnet_backbone('resnet50', pretrained=True, trainable_layers=3)
-
-    def forward(self, x):
-        out = self.model(x)['3']  # get the output of the last residual block
-
-        return out
 
 
 class Decoder(nn.Module):
@@ -60,9 +33,6 @@ class Decoder(nn.Module):
 
     def forward(self, x, P=None):
         point_spheres = self.points.repeat(x.shape[0], 1, 1)
-
-        # if P is not None:
-        #     point_spheres = utils.project_verts(point_spheres, P)
 
         device, dtype = point_spheres.device, point_spheres.dtype
         factor = torch.tensor([1, -1, 1], device=device, dtype=dtype).view(1, 1, 3)
@@ -102,3 +72,4 @@ class PointAlign(nn.Module):
         points, textures = self.decoder(z, P)
 
         return points, textures
+
