@@ -11,6 +11,7 @@ from detectron2.utils.logger import setup_logger
 from pytorch3d.io import load_obj
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.structures import Meshes
+import utils
 
 logger = logging.getLogger("preprocess")
 
@@ -43,7 +44,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--r2n2_dir",
-        default="/home/data/ShapeNet",
+        default="/home/data/ShapeNet/ShapeNetRendering",
         help="Path to the Shapenet renderings as provided by R2N2",
     )
     parser.add_argument(
@@ -54,10 +55,11 @@ def parse_args():
     parser.add_argument(
         "--splits_file",
         default="./data/bench_splits.json",
+  #default="/home/data/ShapeNet/ShapeNetRendering/pix2mesh_splits_val05.json",
         help="Path to the splits file. This is used for final checking",
     )
     parser.add_argument(
-        "--output_dir", default="./datasets/shapenet/ShapeNetV1processed", help="Output directory"
+        "--output_dir", default="/home/data/ShapeNet/ShapeNetV1processed", help="Output directory"
     )
     parser.add_argument(
         "--models_per_synset",
@@ -156,7 +158,7 @@ def handle_model(args, sid, mid, i, N):
     # Save metadata.pt
     image_list = load_image_list(args, sid, mid)
     extrinsics = load_extrinsics(args, sid, mid)
-    intrinsic = get_blender_intrinsic_matrix()
+    intrinsic = utils.get_blender_intrinsic_matrix()
     metadata = {"image_list": image_list, "intrinsic": intrinsic, "extrinsics": extrinsics}
     metadata_path = os.path.join(output_dir, "metadata.pt")
     torch.save(metadata, metadata_path)
@@ -200,7 +202,7 @@ def load_extrinsics(args, sid, mid):
             vals = [float(v) for v in line.strip().split(" ")]
             azimuth, elevation, yaw, dist_ratio, fov = vals
             distance = MAX_CAMERA_DISTANCE * dist_ratio
-            extrinsic = compute_extrinsic_matrix(azimuth, elevation, distance)
+            extrinsic = utils.compute_extrinsic_matrix(azimuth, elevation, distance)
             extrinsics.append(extrinsic)
     extrinsics = torch.stack(extrinsics, dim=0)
     return extrinsics

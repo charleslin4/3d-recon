@@ -1,8 +1,36 @@
 import os
+import copy
+import math
 import torch
+import torchvision.transforms as T
 
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.utils import ico_sphere
+from pytorch3d.structures import Meshes
+
+IMAGENET_MEAN = [0.485, 0.456, 0.406]
+IMAGENET_STD = [0.229, 0.224, 0.225]
+
+INV_IMAGENET_MEAN = [-m for m in IMAGENET_MEAN]
+INV_IMAGENET_STD = [1.0 / s for s in IMAGENET_STD]
+
+def imagenet_preprocess():
+    return T.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
+
+
+def rescale(x):
+    lo, hi = x.min(), x.max()
+    return x.sub(lo).div(hi - lo)
+
+
+def imagenet_deprocess(rescale_image=True):
+    transforms = [
+        T.Normalize(mean=[0, 0, 0], std=INV_IMAGENET_STD),
+        T.Normalize(mean=INV_IMAGENET_MEAN, std=[1.0, 1.0, 1.0]),
+    ]
+    if rescale_image:
+        transforms.append(rescale)
+    return T.Compose(transforms)
 
 
 def save_checkpoint_model(model, model_name, epoch, loss, checkpoint_dir, total_iters):
@@ -33,6 +61,112 @@ def load_point_sphere(save_path='./data/point_sphere.pt'):
     print(f'Loaded point sphere from {save_path}')
     return point_sphere
 
+def get_blender_intrinsic_matrix(N=None):
+    """
+    This is the (default) matrix that blender uses to map from camera coordinates
+    to normalized device coordinates. We can extract it from Blender like this:
+    import bpy
+    camera = bpy.data.objects['Camera']
+    render = bpy.context.scene.render
+    K = camera.calc_matrix_camera(
+         render.resolution_x,
+         render.resolution_y,
+         render.pixel_aspect_x,
+         render.pixel_aspect_y)
+    """
+    K = [
+        [2.1875, 0.0, 0.0, 0.0],
+        [0.0, 2.1875, 0.0, 0.0],
+        [0.0, 0.0, -1.002002, -0.2002002],
+        [0.0, 0.0, -1.0, 0.0],
+    ]
+    K = torch.tensor(K)
+    if N is not None:
+        K = K.view(1, 4, 4).expand(N, 4, 4)
+    return K
+
+def compute_extrinsic_matrix(azimuth, elevation, distance):
+    """
+    Compute 4x4 extrinsic matrix that converts from homogenous world coordinates
+    to homogenous camera coordinates. We assume that the camera is looking at the
+    origin.
+    Inputs:
+    - azimuth: Rotation about the z-axis, in degrees
+    - elevation: Rotation above the xy-plane, in degrees
+    - distance: Distance from the origin
+    Returns:
+    - FloatTensor of shape (4, 4)
+    """
+    azimuth, elevation, distance = (float(azimuth), float(elevation), float(distance))
+    az_rad = -math.pi * azimuth / 180.0
+    el_rad = -math.pi * elevation / 180.0
+    sa = math.sin(az_rad)
+    ca = math.cos(az_rad)
+    se = math.sin(el_rad)
+    ce = math.cos(el_rad)
+    R_world2obj = torch.tensor([[ca * ce, sa * ce, -se], [-sa, ca, 0], [ca * se, sa * se, ce]])
+    R_obj2cam = torch.tensor([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]])
+    R_world2cam = R_obj2cam.mm(R_world2obj)
+    cam_location = torch.tensor([[distance, 0, 0]]).t()
+    T_world2cam = -R_obj2cam.mm(cam_location)
+    RT = torch.cat([R_world2cam, T_world2cam], dim=1)
+    RT = torch.cat([RT, torch.tensor([[0.0, 0, 0, 1]])])
+
+    # For some reason I cannot fathom, when Blender loads a .obj file it rotates
+    # the model 90 degrees about the x axis. To compensate for this quirk we roll
+    # that rotation into the extrinsic matrix here
+    rot = torch.tensor([[1, 0, 0, 0], [0, 0, -1, 0], [0, 1, 0, 0], [0, 0, 0, 1]])
+    RT = RT.mm(rot.to(RT))
+
+    return RT
+
+def blender_ndc_to_world(verts):
+    """
+    Inverse operation to projecting by the Blender intrinsic operation above.
+    In other words, the following should hold:
+    K = get_blender_intrinsic_matrix()
+    verts == blender_ndc_to_world(project_verts(verts, K))
+    """
+    xx, yy, zz = verts.unbind(dim=1)
+    a1, a2, a3 = 2.1875, 2.1875, -1.002002
+    b1, b2 = -0.2002002, -1.0
+    z = b1 / (b2 * zz - a3)
+    y = (b2 / a2) * (z * yy)
+    x = (b2 / a1) * (z * xx)
+    out = torch.stack([x, y, z], dim=1)
+    return out
+
+def voxel_to_world(meshes):
+    """
+    When predicting voxels, we operate in a [-1, 1]^3 coordinate space where the
+    intrinsic matrix has already been applied, the y-axis has been flipped to
+    to align with the image plane, and the z-axis has been rescaled so the min/max
+    z values in the dataset correspond to -1 / 1. This function undoes these
+    transformations, and projects a Meshes from voxel-space into world space.
+    TODO: This projection logic is tightly coupled to the MeshVox Dataset;
+    they should maybe both be refactored?
+    Input:
+    - meshes: Meshes in voxel coordinate system
+    Output:
+    - meshes: Meshes in world coordinate system
+    """
+    verts = meshes.verts_packed()
+    x, y, z = verts.unbind(dim=1)
+
+    zmin, zmax = SHAPENET_MIN_ZMIN, SHAPENET_MAX_ZMAX
+    m = 2.0 / (zmax - zmin)
+    b = -2.0 * zmin / (zmax - zmin) - 1
+
+    y = -y
+    z = (z - b) / m
+    verts = torch.stack([x, y, z], dim=1)
+    verts = blender_ndc_to_world(verts)
+
+    verts_list = list(verts.split(meshes.num_verts_per_mesh().tolist(), dim=0))
+    faces_list = copy.deepcopy(meshes.faces_list())
+    meshes_world = Meshes(verts=verts_list, faces=faces_list)
+
+    return meshes_world
 
 def project_verts(verts, P, eps=1e-1):
     """
