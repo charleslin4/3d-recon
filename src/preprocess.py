@@ -7,10 +7,10 @@ from collections import defaultdict
 from multiprocessing import Pool
 import torch
 
-from detectron2.utils.logger import setup_logger
 from pytorch3d.io import load_obj
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.structures import Meshes
+from utils import compute_extrinsic_matrix, get_blender_intrinsic_matrix, project_verts
 
 logger = logging.getLogger("preprocess")
 
@@ -74,7 +74,6 @@ def parse_args():
 
 
 def main(args):
-    setup_logger(name="preprocess")
     #if os.path.isdir(args.output_dir):
         #logger.info("ERROR: Output directory exists")
         #logger.info(args.output_dir)
