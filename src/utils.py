@@ -1,8 +1,8 @@
 import os
 import copy
-import math
 import torch
 import torchvision.transforms as T
+import math
 
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.utils import ico_sphere
@@ -211,7 +211,68 @@ def project_verts(verts, P, eps=1e-1):
     return verts_proj
 
 
-def save_point_clouds(obj_file, img_file, img_gt_file, pc_padded, img, img_gt):
+def compute_extrinsic_matrix(azimuth, elevation, distance):
+    """
+    Compute 4x4 extrinsic matrix that converts from homogenous world coordinates
+    to homogenous camera coordinates. We assume that the camera is looking at the
+    origin.
+    Inputs:
+    - azimuth: Rotation about the z-axis, in degrees
+    - elevation: Rotation above the xy-plane, in degrees
+    - distance: Distance from the origin
+    Returns:
+    - FloatTensor of shape (4, 4)
+    """
+    azimuth, elevation, distance = (float(azimuth), float(elevation), float(distance))
+    az_rad = -math.pi * azimuth / 180.0
+    el_rad = -math.pi * elevation / 180.0
+    sa = math.sin(az_rad)
+    ca = math.cos(az_rad)
+    se = math.sin(el_rad)
+    ce = math.cos(el_rad)
+    R_world2obj = torch.tensor([[ca * ce, sa * ce, -se], [-sa, ca, 0], [ca * se, sa * se, ce]])
+    R_obj2cam = torch.tensor([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]])
+    R_world2cam = R_obj2cam.mm(R_world2obj)
+    cam_location = torch.tensor([[distance, 0, 0]]).t()
+    T_world2cam = -R_obj2cam.mm(cam_location)
+    RT = torch.cat([R_world2cam, T_world2cam], dim=1)
+    RT = torch.cat([RT, torch.tensor([[0.0, 0, 0, 1]])])
+
+    # For some reason I cannot fathom, when Blender loads a .obj file it rotates
+    # the model 90 degrees about the x axis. To compensate for this quirk we roll
+    # that rotation into the extrinsic matrix here
+    rot = torch.tensor([[1, 0, 0, 0], [0, 0, -1, 0], [0, 1, 0, 0], [0, 0, 0, 1]])
+    RT = RT.mm(rot.to(RT))
+
+    return RT
+
+
+def get_blender_intrinsic_matrix(N=None):
+    """
+    This is the (default) matrix that blender uses to map from camera coordinates
+    to normalized device coordinates. We can extract it from Blender like this:
+    import bpy
+    camera = bpy.data.objects['Camera']
+    render = bpy.context.scene.render
+    K = camera.calc_matrix_camera(
+         render.resolution_x,
+         render.resolution_y,
+         render.pixel_aspect_x,
+         render.pixel_aspect_y)
+    """
+    K = [
+        [2.1875, 0.0, 0.0, 0.0],
+        [0.0, 2.1875, 0.0, 0.0],
+        [0.0, 0.0, -1.002002, -0.2002002],
+        [0.0, 0.0, -1.0, 0.0],
+    ]
+    K = torch.tensor(K)
+    if N is not None:
+        K = K.view(1, 4, 4).expand(N, 4, 4)
+    return K
+
+
+def save_point_clouds(obj_file, img_fil_img_gt_file, pc_padded, img, img_gt):
     torch.save(pc_padded, obj_file)
     imageio.imsave(img_file, format_image(img))
     imageio.imsave(img_gt_file, format_image(img_gt))
