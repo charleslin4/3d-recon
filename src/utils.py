@@ -168,7 +168,7 @@ def rotate_verts(RT, verts):
         return verts_rot
 
     R = RT[:, :3, :3]
-    verts_rot = verts.bmm(R.transpose(1, 2))
+    verts_rot = verts.bmm(R)  # verts.bmm(R.transpose(1, 2))
     if singleton:
         verts_rot = verts_rot[0]
     return verts_rot

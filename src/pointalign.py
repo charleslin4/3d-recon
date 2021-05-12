@@ -34,6 +34,9 @@ class Decoder(nn.Module):
     def forward(self, x, P=None):
         point_spheres = self.points.repeat(x.shape[0], 1, 1)
 
+        if P is not None:
+            point_spheres = project_verts(point_spheres, P)
+
         device, dtype = point_spheres.device, point_spheres.dtype
         factor = torch.tensor([1, -1, 1], device=device, dtype=dtype).view(1, 1, 3)
         point_spheres = point_spheres * factor
