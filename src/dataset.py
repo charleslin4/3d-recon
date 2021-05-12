@@ -5,11 +5,12 @@ import torch
 from fvcore.common.file_io import PathManager
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.structures import Meshes, Pointclouds
+from pytorch3d.datasets.r2n2.utils import project_verts
 from torch.utils.data import Dataset
 
 import torchvision.transforms as T
 from PIL import Image
-from utils import imagenet_preprocess, project_verts
+from utils import imagenet_preprocess
 
 logger = logging.getLogger(__name__)
 
@@ -161,9 +162,9 @@ class MeshPCDataset(Dataset):
                 meshes, num_samples=self.num_samples, return_normals=True
             )
         if RT is not None:
-            RT = torch.stack(RT, 0).to(device)
+            RT = [rt.to(device) for rt in RT]
         if K is not None:
-            K = torch.stack(K, 0).to(device)
+            K = [k.to(device) for k in K]
 
         if self.return_id_str:
             return imgs, meshes, points, normals, RT, K, id_strs
