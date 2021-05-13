@@ -41,3 +41,4 @@ def build_backbone(name, pretrained=True):
         return backbone, feat_dims
     else:
         raise ValueError('Unrecognized backbone type "%s"' % name)
+

@@ -56,10 +56,9 @@ class Decoder(nn.Module):
         vert_feats = torch.cat([vert_feats_nopos, point_spheres], dim=-1)
 
         point_offsets = torch.tanh(self.point_offset(vert_feats))
-        out_textures = torch.sigmoid(self.point_texture(vert_feats))
 
         out_points = point_spheres + point_offsets
-        return out_points, out_textures  # At the moment, returning a Pointclouds object will create an infinite loop
+        return out_points
 
 
 class PointAlign(nn.Module):
@@ -72,7 +71,7 @@ class PointAlign(nn.Module):
 
     def forward(self, images, P=None):
         z = self.encoder(images)[-1]
-        points, textures = self.decoder(z, P)
+        points = self.decoder(z, P)
 
-        return points, textures
+        return points
 

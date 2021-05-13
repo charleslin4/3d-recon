@@ -19,8 +19,7 @@ DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 def train(args):
 
     ae = PointAlign().to(DEVICE)
-    opt = torch.optim.SGD(ae.parameters(), lr=1e-2, momentum=0.9)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=5)
+    opt = torch.optim.Adam(ae.parameters(), lr=5e-4)
 
     deprocess_transform = imagenet_deprocess()
     # Rotation matrix to transform the ground truth point clouds to the same views as the input images
@@ -39,7 +38,6 @@ def train(args):
             shuffle=True,
             num_samples=None
         )
-        breakpoint()
 
         for batch_idx, batch in enumerate(train_loader):
             images, _, ptclds_gt, normals, RT, K = train_loader.postprocess(batch)
@@ -47,9 +45,8 @@ def train(args):
             opt.zero_grad()
             ae.train()
 
-            ptclds_pred, textures_pred = ae(images)
-            ptclds_gt_cam = rotate_verts(rot.to(RT).unsqueeze(0).repeat(batch_size, 1, 1), ptclds_gt)
-            loss, _ = chamfer_distance(ptclds_gt_cam, ptclds_pred)
+            ptclds_pred = ae(images, RT)
+            loss, _ = chamfer_distance(ptclds_gt, ptclds_pred)
             loss.backward()
 
             grads = nn.utils.clip_grad_norm_(ae.parameters(), 50)
@@ -65,16 +62,18 @@ def train(args):
                 wandb.log({
                     'image': wandb.Image(deprocess_transform(images)[0].permute(1, 2, 0).cpu().numpy()),
                     'pt_cloud/pred': wandb.Object3D(ptclds_pred[0].detach().cpu().numpy()),
-                    'pt_cloud/gt': wandb.Object3D(ptclds_gt_cam[0].detach().cpu().numpy())
+                    'pt_cloud/gt': wandb.Object3D(ptclds_gt[0].detach().cpu().numpy())
                 })
 
-            if global_iter % args.save_freq == 0:
-                print('Saving the latest model (epoch %d, global_iter %d)' % (epoch, global_iter))
-                save_checkpoint_model(ae, args.model_name, epoch, loss, args.checkpoint_dir, global_iter)
+            # if global_iter % args.save_freq == 0:
+            #     print('Saving the latest model (epoch %d, global_iter %d)' % (epoch, global_iter))
+            #     save_checkpoint_model(ae, args.model_name, epoch, loss, args.checkpoint_dir, global_iter)
             
             global_iter += 1
+            
+        print(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')
+        save_checkpoint_model(ae, args.model_name, epoch, loss, args.checkpoint_dir, global_iter)
 
-        scheduler.step()
 
 
 if __name__ == "__main__":
@@ -83,7 +82,7 @@ if __name__ == "__main__":
     parser.add_argument('--data_dir', type=str, default='/home/data/ShapeNet/ShapeNetV1processed')
     parser.add_argument('--bs', type=int, default=8)
     parser.add_argument('--epochs', type=int, default=1)
-    parser.add_argument('--save_freq', type=int, default=500)
+    parser.add_argument('--save_freq', type=int, default=1000)
     parser.add_argument('--model_name', type=str, default='baseline')
     parser.add_argument('--checkpoint_dir', type=str, default='/home/checkpoints')
     parser.add_argument('--splits_path', type=str, default='./data/bench_splits.json')
