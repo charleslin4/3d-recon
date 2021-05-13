@@ -19,7 +19,8 @@ DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 def train(args):
 
     ae = PointAlign().to(DEVICE)
-    opt = torch.optim.Adam(ae.parameters(), lr=1e-3)
+    opt = torch.optim.SGD(ae.parameters(), lr=1e-2, momentum=0.9)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=5)
 
     deprocess_transform = imagenet_deprocess()
     # Rotation matrix to transform the ground truth point clouds to the same views as the input images
@@ -38,6 +39,7 @@ def train(args):
             shuffle=True,
             num_samples=None
         )
+        breakpoint()
 
         for batch_idx, batch in enumerate(train_loader):
             images, _, ptclds_gt, normals, RT, K = train_loader.postprocess(batch)
@@ -49,11 +51,14 @@ def train(args):
             ptclds_gt_cam = rotate_verts(rot.to(RT).unsqueeze(0).repeat(batch_size, 1, 1), ptclds_gt)
             loss, _ = chamfer_distance(ptclds_gt_cam, ptclds_pred)
             loss.backward()
+
+            grads = nn.utils.clip_grad_norm_(ae.parameters(), 50)
             opt.step()
 
             print("Epoch {}\tTrain step {}\tLoss: {:.2f}".format(epoch, batch_idx, loss))
             wandb.log({
                 'loss': loss,
+                'grads': grads
             })
 
             if batch_idx % 25 == 0:
@@ -68,6 +73,8 @@ def train(args):
                 save_checkpoint_model(ae, args.model_name, epoch, loss, args.checkpoint_dir, global_iter)
             
             global_iter += 1
+
+        scheduler.step()
 
 
 if __name__ == "__main__":
