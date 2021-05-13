@@ -3,6 +3,8 @@ import copy
 import torch
 import torchvision.transforms as T
 import math
+import imageio
+import numpy
 
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.utils import ico_sphere
@@ -174,10 +176,22 @@ def rotate_verts(RT, verts):
     return verts_rot
 
 
-def save_point_clouds(obj_file, img_fil_img_gt_file, pc_padded, img, img_gt):
-    torch.save(pc_padded, obj_file)
-    imageio.imsave(img_file, format_image(img))
-    imageio.imsave(img_gt_file, format_image(img_gt))
+def save_point_clouds(id, ptclds_pred, ptclds_gt, results_dir):
+    #torch.save(pc_padded, obj_file)
+    #imageio.imsave(img_file, format_image(img))
+    #imageio.imsave(img_gt_file, format_image(img_gt))
+
+    #deprocess = imagenet_deprocess(rescale_image=False)
+    #ptclds_img = deprocess(ptclds_img)
+    ptcld_obj_file = os.path.join(results_dir, '%s.pth' % id)
+    torch.save(ptclds_pred, ptcld_obj_file)
+
+    ptclds_gt_obj_file = os.path.join(results_dir, '%s_gt.pth' % id)
+    torch.save(ptclds_gt, ptclds_gt_obj_file)
+    
+    ptclds_img = ptclds_pred[0].detach().cpu().numpy()
+    ptcld_img_file = os.path.join(results_dir, '%s.png' % id)
+    imageio.imsave(ptcld_img_file, ptclds_img)
 
 
 def format_image(images):
