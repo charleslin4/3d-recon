@@ -16,6 +16,7 @@ IMAGENET_STD = [0.229, 0.224, 0.225]
 INV_IMAGENET_MEAN = [-m for m in IMAGENET_MEAN]
 INV_IMAGENET_STD = [1.0 / s for s in IMAGENET_STD]
 
+
 def imagenet_preprocess():
     return T.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
 

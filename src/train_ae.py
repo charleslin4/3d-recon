@@ -12,8 +12,8 @@ import wandb
 from omegaconf import DictConfig, OmegaConf
 import hydra
 
-from pointalign import PointAlign
-from dataloader import build_data_loader
+from models.pointalign import PointAlign, PointAlignSmall
+from datautils.dataloader import build_data_loader
 import utils
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -25,7 +25,7 @@ def train(config):
     orig_dir = hydra.utils.get_original_cwd()
 
     # NOTE This is all sort of janky, since we have a shared data directory on the Google Cloud VM.
-    timestamp = datetime.now().strftime("%Y%m%d.%H.%m.%s")
+    timestamp = datetime.now().strftime("%Y-%m-%d.%H-%m-%S")
     model_name = f'{config.model}_vq_{timestamp}' if config.vq else f'{config.model}_{timestamp}'
     checkpoint_dir = os.path.join(run_dir, config.checkpoint_dir)  # Save checkpoints to run directory
 
@@ -34,8 +34,9 @@ def train(config):
     splits_path = os.path.join(orig_dir, config.splits_path)  # Load splits from original path
     deprocess_transform = utils.imagenet_deprocess()
 
-    ae = PointAlign(points).to(DEVICE)
-    opt = torch.optim.Adam(ae.parameters(), lr=5e-4)
+    ae = PointAlign(points) if config.model == 'PointAlign' else PointAlignSmall(points)
+    ae.to(DEVICE)
+    opt = torch.optim.Adam(ae.parameters(), lr=config.lr)
 
     wandb.init(name=model_name, project='3d-recon', entity='3drecon2')
 
