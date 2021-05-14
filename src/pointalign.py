@@ -17,10 +17,10 @@ DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 class Decoder(nn.Module):
 
-    def __init__(self, img_feat_dim=2048, hidden_dim=512):
+    def __init__(self, points, img_feat_dim=2048, hidden_dim=512):
         super(Decoder, self).__init__()
 
-        self.points = utils.load_point_sphere().to(DEVICE)
+        self.points = points.to(DEVICE)
 
         self.bottleneck = nn.Linear(img_feat_dim, hidden_dim)
         self.fc1 = nn.Linear(hidden_dim + 3, hidden_dim)
@@ -63,11 +63,11 @@ class Decoder(nn.Module):
 
 class PointAlign(nn.Module):
 
-    def __init__(self):
+    def __init__(self, points):
         super().__init__()
 
         self.encoder, feat_dims = build_backbone('resnet50', pretrained=True)
-        self.decoder = Decoder(feat_dims[-1], 512)
+        self.decoder = Decoder(points, feat_dims[-1], 512)
 
     def forward(self, images, P=None):
         z = self.encoder(images)[-1]
