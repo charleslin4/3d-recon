@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from pytorch3d.loss import chamfer_distance
 
 import wandb
-from pointalign import PointAlign
+from pointalign import PointAlign, PointAlignSmall
 from dataloader import build_data_loader
 from utils import save_checkpoint_model, rotate_verts, imagenet_deprocess
 
@@ -18,7 +18,7 @@ DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 def train(args):
 
-    ae = PointAlign().to(DEVICE)
+    ae = PointAlignSmall().to(DEVICE) if args.small else PointAlign().to(DEVICE)
     opt = torch.optim.Adam(ae.parameters(), lr=5e-4)
 
     deprocess_transform = imagenet_deprocess()
@@ -86,6 +86,7 @@ if __name__ == "__main__":
     parser.add_argument('--model_name', type=str, default='baseline')
     parser.add_argument('--checkpoint_dir', type=str, default='/home/checkpoints')
     parser.add_argument('--splits_path', type=str, default='./data/bench_splits.json')
+    parser.add_argument('--small', action='store_true')
     args = parser.parse_args()
 
     random.seed(args.seed)
