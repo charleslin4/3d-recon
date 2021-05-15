@@ -8,162 +8,149 @@ import torch
 from torch.utils.data import DataLoader
 from pytorch3d.datasets import R2N2, collate_batched_R2N2
 from pytorch3d.structures import Meshes, Pointclouds
-from pytorch3d.loss import chamfer_distance
+from pytorch3d.loss import chamfer
 from pytorch3d.ops import sample_points_from_meshes, knn_points
 
 from dataloader import build_data_loader
 from pointalign import PointAlign
-from utils import save_point_clouds, format_image, rotate_verts
+from utils import save_point_clouds, format_image, rotate_verts, imagenet_deprocess
+import wandb
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 POINT_CLOUD_SIZE = 10000
+class_names = {
+    "02828884": "bench",
+    "03001627": "chair",
+    "03636649": "lamp",
+    "03691459": "speaker",
+    "04090263": "firearm",
+    "04379243": "table",
+    "04530566": "watercraft",
+    "02691156": "plane",
+    "02933112": "cabinet",
+    "02958343": "car",
+    "03211117": "monitor",
+    "04256520": "couch",
+    "04401088": "cellphone",
+}
 
 
-def compute_min_cd(pc_set, x_gt):
+def compute_min_cham_dist(ptclds_set, ptcld_gt):
     '''
-    Computes the minimum Chamfer Distance (CD) between a ground truth
+    Computes the minimum Chamfer Distance between a ground truth
     Pointclouds object and a set of generated Pointclouds objects.
 
     Inputs:
-        pc_set: a list of Pointclouds objects
-        x_gt: a single Pointclouds object
+        ptclds_set: a list of Pointclouds objects
+        ptcld_gt: a single Pointclouds object
 
     Returns:
-        minimum Chamfer Distance
+        min_cham_dist: minimum Chamfer Distance
     '''
 
-    num_samples = pc_set._N
-    x_gt_set = x_gt.repeat(num_samples, 1, 1)  # reshape into (N, P, D)
-    cds, _ = chamfer_distance(pc_set, x_gt_set, batch_reduction=None)
+    num_samples = ptclds_set._N
+    ptcld_gt_set = ptcld_gt.repeat(num_samples, 1, 1)  # reshape into (N, P, D)
+    cds, _ = chamfer_distance(pc_set, ptcld_gt_set, batch_reduction=None)
     min_cd = cds.min()
     return min_cd
+
+
+def compute_cham_dist(metrics, ptclds1, ptclds2):
+    '''
+    Computes the sum of the mean Chamfer Distance between two batches of point clouds.
+    Stores in metrics.
+
+    Inputs:
+        metrics: dict storing all test metrics
+        ptclds1: FloatTensor of shape (N, P1, D) representing a batch of point clouds
+            with at most P1 points in each batch element, batch size N, and feature dimension D.
+        ptclds2: FloatTensor of shape (N, P2, D) representing a batch of point clouds
+            with at most P2 points in each batch element, batch size N, and feature dimension D.
+    '''
+    
+    breakpoint()
+    cham_dist = chamfer_distance(ptclds1, ptclds2, batch_reduction=None, point_reduction="mean")
+    metrics["Chamfer"] += cham_dist #check shape: should be (N,) where N is batch size
+    
+    return
+
+
+def compute_f1_scores(metrics, ptclds_pred, ptclds_gt, thresholds, eps):
+    '''
+    Computes F1 scores between each pair of predicted and ground-truth point clouds at the given thresholds.
+    Stores in metrics.
+
+    Inputs:
+        ptclds_pred: Tensor of shape (N, S, 3) giving coordinates for each predicted point cloud
+        ptclds_gt: Tensor of shape (N, S, 3) giving coordinates for each ground-truth point cloud
+        thresholds: distance thresholds to use when computing F1 scores
+        eps: small number to handle numerically instability issues
+        metrics: dict storing all test metrics
+    
+    Adapted from https://github.com/facebookresearch/meshrcnn/blob/df9617e9089f8d3454be092261eead3ca48abc29/meshrcnn/utils/metrics.py
+    '''
+
+    pred_lengths = torch.full((ptclds_pred.shape[0],), ptclds_pred.shape[1], dtype=torch.int64, device=ptclds_pred.device)
+    gt_lengths = torch.full((ptclds_gt.shape[0],), ptclds_gt.shape[1], dtype=torch.int64, device=ptclds_gt.device)
+    
+    # For each predicted point, find its neareast-neighbor ground-truth point
+    knn_pred = knn_points(ptclds_pred, ptclds_gt, lengths1=pred_lengths, lengths2=gt_lengths, K=1)
+    # Compute L2 distances between each predicted point and its nearest ground-truth
+    pred_to_gt_dists = np.sqrt(knn_pred.dists[..., 0].cpu()) #(N, S)
+    
+    # For each ground-truth point, find its nearest-neighbor predicted point
+    knn_gt = knn_points(ptclds_gt, ptclds_pred, lengths1=gt_lengths, lengths2=pred_lengths, K=1)
+    # Compute L2 distances between each ground-truth point and its nearest predicted point
+    gt_to_pred_dists = np.sqrt(knn_gt.dists[..., 0].cpu()) #(N, S)
+
+    # Compute F1 scores based on L2 distances
+    for t in thresholds:
+        precision = 100.0 * (pred_to_gt_dists < t).float().mean(dim=1) #(N,)
+        recall = 100.0 * (gt_to_pred_dists < t).float().mean(dim=1) #(N,)
+        f1 = (2.0 * precision * recall) / (precision + recall + eps) #(N,)
+        metrics["F1@%f" % t] = f1 #is N the number of classes or batch size? if batchsize, do f1.sum(axis=0)
+    
+    return
 
 
 def compute_mean_iou():
     pass
 
 
-def compute_f1_scores(pred_points, gt_points, thresholds=[0.1, 0.2, 0.3, 0.4, 0.5], eps=1e-8):
+def compute_metrics(ptclds_pred, ptclds_gt, thresholds=[0.1, 0.2, 0.3, 0.4, 0.5], eps=1e-8, reduce=True):
     '''
-    Inputs:
-        pred_points: Tensor of shape (N, S, 3) giving coordinates for each predicted Pointcloud
-        gt_points: Tensor of shape (N, S, 3) giving coordinates for each ground-truth Pointcloud
-        thresholds: The distance thresholds to use when computing F1 scores
-        eps: small number to handle numerically instability issues
-    
-    Returns:
-        f1_scores: a dictionary mapping thresholds to F1 scores (scalars)
+    Adapted from https://github.com/facebookresearch/meshrcnn/blob/df9617e9089f8d3454be092261eead3ca48abc29/meshrcnn/utils/metrics.py
     '''
-
-    pred_lengths = torch.full((pred_points.shape[0],), pred_points.shape[1], dtype=torch.int64, device=pred_points.device)
-    gt_lengths = torch.full((gt_points.shape[0],), gt_points.shape[1], dtype=torch.int64, device=gt_points.device)
-    
-    knn_pred = knn_points(pred_points, gt_points, lengths1=pred_lengths, lengths2=gt_lengths, K=1)
-    knn_gt = knn_points(gt_points, pred_points, lengths1=gt_lengths, lengths2=pred_lengths, K=1)
-    
-    pred_to_gt_dists = np.sqrt(knn_pred.dists[..., 0].cpu()) #(N, S)
-    gt_to_pred_dists = np.sqrt(knn_gt.dists[..., 0].cpu()) #(N, S)
-
-    f1_scores = {}
-    for t in thresholds:
-        precision = 100.0 * (pred_to_gt_dists < t).float().mean(dim=1)
-        recall = 100.0 * (gt_to_pred_dists < t).float().mean(dim=1)
-        f1 = (2.0 * precision * recall) / (precision + recall + eps)
-        f1_scores[t] = f1.sum(axis=0).int()
-    return f1_scores
-
-def compute_pc_metrics(pred_points, gt_points, thresholds, eps):
-    """
-    Compute metrics that are based on sampling points and normals:
-    - L2 Chamfer distance
-    - Precision at various thresholds
-    - Recall at various thresholds
-    - F1 score at various thresholds
-    Inputs:
-        - pred_points: Tensor of shape (N, S, 3) giving coordinates of sampled points
-          for each predicted mesh
-        - pred_normals: Tensor of shape (N, S, 3) giving normals of points sampled
-          from the predicted mesh, or None if such normals are not available
-        - gt_points: Tensor of shape (N, S, 3) giving coordinates of sampled points
-          for each ground-truth mesh
-        - thresholds: Distance thresholds to use for precision / recall / F1
-        - eps: epsilon value to handle numerically unstable F1 computation
-    Returns:
-        - metrics: A dictionary where keys are metric names and values are Tensors of
-          shape (N,) giving the value of the metric for the batch
-    """
     metrics = {}
-    lengths_pred = torch.full(
-        (pred_points.shape[0],), pred_points.shape[1], dtype=torch.int64, device=pred_points.device
-    )
-    lengths_gt = torch.full(
-        (gt_points.shape[0],), gt_points.shape[1], dtype=torch.int64, device=gt_points.device
-    )
-
-    # For each predicted point, find its neareast-neighbor GT point
-    knn_pred = knn_points(pred_points, gt_points, lengths1=lengths_pred, lengths2=lengths_gt, K=1)
-    # Compute L1 and L2 distances between each pred point and its nearest GT
-    pred_to_gt_dists2 = knn_pred.dists[..., 0]  # (N, S)
-    pred_to_gt_dists = pred_to_gt_dists2.sqrt()  # (N, S)
-
-    # For each GT point, find its nearest-neighbor predicted point
-    knn_gt = knn_points(gt_points, pred_points, lengths1=lengths_gt, lengths2=lengths_pred, K=1)
-    # Compute L1 and L2 dists between each GT point and its nearest pred point
-    gt_to_pred_dists2 = knn_gt.dists[..., 0]  # (N, S)
-    gt_to_pred_dists = gt_to_pred_dists2.sqrt()  # (N, S)
-
-    # Compute L2 chamfer distances
-    chamfer_l2 = pred_to_gt_dists2.mean(dim=1) + gt_to_pred_dists2.mean(dim=1)
-    metrics["Chamfer-L2"] = chamfer_l2
-
-    # Compute precision, recall, and F1 based on L2 distances
-    for t in thresholds:
-        precision = 100.0 * (pred_to_gt_dists < t).float().mean(dim=1)
-        recall = 100.0 * (gt_to_pred_dists < t).float().mean(dim=1)
-        f1 = (2.0 * precision * recall) / (precision + recall + eps)
-        metrics["Precision@%f" % t] = precision
-        metrics["Recall@%f" % t] = recall
-        metrics["F1@%f" % t] = f1
-
-    # Move all metrics to CPU
+    compute_f1_scores(metrics, ptclds_pred, ptclds_gt, thresholds, eps)
+    compute_cham_dist(metrics, ptclds_pred, ptclds_gt)
     metrics = {k: v.cpu() for k, v in metrics.items()}
+
     return metrics
 
 
-def get_metrics(pred_points, gt_points, thresholds=[0.1, 0.2, 0.3, 0.4, 0.5], eps=1e-8):
+def render_ptcld(ptcld):
     '''
-    if torch.is_tensor(pred_points) and torch.is_tensor(gt_points):
-        metrics = compute_pc_metrics(
-            pred_points, gt_points, thresholds, eps
-        )
-    else:
-        metrics = defaultdict(list)
-        for cur_points_pred, cur_points_gt in zip(pred_points, gt_points):
-            cur_metrics = compute_pc_metrics(
-                cur_points_pred[None], cur_points_gt[None], thresholds, eps
-            )
-            for k, v in cur_metrics.items():
-                metrics[k].append(v.item())
-        metrics = {k: torch.tensor(vs) for k, vs in metrics.items()}
-    return metrics
+    Renders a single 3D point cloud.
+
+    Inputs:
+        ptcld: Tensor of shape (N, S, 3)
+    
+    Returns:
+        ptcld_img: 2D rendered image of 3D point cloud in camera coordinates
     '''
-    metrics = defaultdict(list)
-    for cur_points_pred, cur_points_gt in zip(pred_points, gt_points):
-        cur_metrics = compute_pc_metrics(
-            cur_points_pred[None], cur_points_gt[None], thresholds, eps
-        )
-        for k, v in cur_metrics.items():
-            metrics[k].append(v.item())
-    metrics = {k: torch.tensor(vs) for k, vs in metrics.items()}
-    return metrics
+
+    return
 
 
 def evaluate():
-    print('============================================================')
-    print('============ Evaluate 3D Point Cloud Generation ============')
-    print('============================================================')
+    results_dir = os.path.join(args.results_dir, f'{args.model_name}')
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir)
+    metrics_file = os.path.join(results_dir, 'metrics.csv')
+    print("\nPoint clouds will be saved in: " + results_dir)
+    print("Metrics will be written to: " + metrics_file)
 
-    # Load test data
     test_loader = build_data_loader(
         data_dir=args.data_dir,
         split_name='test',
@@ -173,80 +160,65 @@ def evaluate():
         multigpu=False,
         shuffle=True,
         num_samples=None
-    )
+    ) # edit this later
 
-    class_names = {
-        "02828884": "bench",
-        "03001627": "chair",
-        "03636649": "lamp",
-        "03691459": "speaker",
-        "04090263": "firearm",
-        "04379243": "table",
-        "04530566": "watercraft",
-        "02691156": "plane",
-        "02933112": "cabinet",
-        "02958343": "car",
-        "03211117": "monitor",
-        "04256520": "couch",
-        "04401088": "cellphone",
-    }
+    if args.model_name == 'baseline':
+        model = PointAlign().to(DEVICE)
+    elif args.model_name == 'vq-vae':
+        # model = 
+        pass
+    else:
+        raise ValueError("Model [%s] not recognized." % args.model)
+    checkpoint = torch.load(os.path.join(args.checkpoint_dir, 'baseline_model_41400.pth')) # edit this later
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.eval()
+
     num_instances = {i: 0 for i in class_names}
     chamfer = {i: 0 for i in class_names}
     f1_01 = {i: 0 for i in class_names}
     f1_03 = {i: 0 for i in class_names}
     f1_05 = {i: 0 for i in class_names}
-    count = 0
-
-    # Save path for metrics and point clouds
-    results_dir = os.path.join(args.results_dir, f'{args.model_name}')
-    if not os.path.exists(results_dir):
-        os.makedirs(results_dir)
-    metrics_file = os.path.join(results_dir, 'metrics.csv')
-    print("\nPoint clouds will be saved in: " + results_dir)
-    print("Metrics (Chamfer distance and F1 scores) will be written to: " + metrics_file)
-    
-    # Initialize & load models
-    if args.model_name == 'baseline':
-        model = PointAlign().to(DEVICE)
-    elif args.model_name == 'vq-vae':
-        # ADD IMPORT STATEMENT FOR VQ-VAE
-        # model = 
-        pass
-    else:
-        raise ValueError("Model [%s] not recognized." % args.model)
-    if args.load_dir is not None:
-        checkpoint = torch.load(opt.checkpoint_dir)
-        model.load_state_dict(checkpoint['model_state_dict'])
-
-    model.eval()
+    num_test = 0
     with torch.no_grad():
         for batch_idx, batch in enumerate(test_loader):
+            if batch_idx == 3:
+                return
+            breakpoint()
             images, _, ptclds_gt, normals, RT, K, id_strs = test_loader.postprocess(batch)
-            #sids = [id_str.split("-")[0] for id_str in id_strs]
-            sids = [id_strs[0].split("-")[0]]
-            for sid in sids:
-                num_instances[sid] += 1
+            num_test += images.shape[0]
+            syn_ids = [id_str.split("-")[0] for id_str in id_strs]
+            #syn_id = '02828884'
+            for syn_id in syn_ids:
+                num_instances[syn_id] += 1
             
+            breakpoint()
             ptclds_pred, textures_pred = model(images)
-            ptclds_gt_cam = rotate_verts(RT, ptclds_gt) # do some rotation here
-            cur_metrics = get_metrics(ptclds_pred, ptclds_gt)
+            ptclds_gt_cam = rotate_verts(RT, ptclds_gt)
+            cur_metrics = compute_metrics(ptclds_pred, ptclds_gt_cam) #get metrics for gt in camera coords?
 
-            for i, sid in enumerate(sids):
-                chamfer[sid] += cur_metrics["Chamfer-L2"][i].item()
-                f1_01[sid] += cur_metrics["F1@%f" % 0.1][i].item()
-                f1_03[sid] += cur_metrics["F1@%f" % 0.3][i].item()
-                f1_05[sid] += cur_metrics["F1@%f" % 0.5][i].item()
+            for i, syn_id in enumerate(syn_ids):
+                breakpoint()
+                chamfer[syn_id] += cur_metrics["Chamfer"]
+                f1_01[syn_id] += cur_metrics["F1@%f" % 0.1]
+                f1_03[syn_id] += cur_metrics["F1@%f" % 0.3]
+                f1_05[syn_id] += cur_metrics["F1@%f" % 0.5]
 
-                # Periodically save generated & ground-truth pointcloud objects and their rendered images
-                if i % args.save_freq == 0:
-                    save_point_clouds(id_strs[i], ptclds_pred, ptclds_gt, results_dir)
-
+            #if num_test % args.save_freq == 0:
+                #for i, sid in enumerate(sids):
+                    #save_point_clouds(id_strs[i] + str(num_test), ptclds_pred, ptclds_gt_cam, results_dir)
+                    #deprocess_transform = imagenet_deprocess()
+                    #wandb.log({
+                        #'image': wandb.Image(deprocess_transform(images)[0].permute(1, 2, 0).cpu().numpy()),
+                        #'pt_cloud/pred': wandb.Object3D(ptclds_pred[0].detach().cpu().numpy()),
+                        #'pt_cloud/gt': wandb.Object3D(ptclds_gt_cam[0].detach().cpu().numpy())
+                        #})
+    
         col_headers = class_names.values()
-        chamfer_save = {class_names[key] : value for key, value in chamfer.items()}
-        f1_01_save = {class_names[key] : value for key, value in f1_01.items()}
-        f1_03_save = {class_names[key] : value for key, value in f1_03.items()}
-        f1_05_save = {class_names[key] : value for key, value in f1_05.items()}
-        metrics = [chamfer_save, f1_01_save, f1_03_save, f1_05_save] 
+        chamfer_final = {class_names[syn_id] : cham_dist/num_instances[syn_id] for syn_id, cham_dist in chamfer.items()}
+        f1_01_final = {class_names[syn_id] : f1_01/num_instances[syn_id] for syn_id, f1_01 in f1_01.items()}
+        f1_03_final = {class_names[syn_id] : f1_03/num_instances[syn_id] for syn_id, f1_03 in f1_03.items()}
+        f1_05_final = {class_names[syn_id] : f1_05/num_instances[syn_id] for syn_id, f1_05 in f1_05.items()}
+        metrics = [chamfer_final, f1_01_final, f1_03_final, f1_05_final] 
         with open(metrics_file, 'w') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=col_headers)
             writer.writeheader()
@@ -256,15 +228,17 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', type=str, default='baseline', help='baseline or vq-vae')
-    parser.add_argument('--bs', type=int, default=1, help='batch size')
+    parser.add_argument('--bs', type=int, default=32, help='batch size')
     parser.add_argument('--data_dir', type=str, default='/home/data/ShapeNet/ShapeNetV1processed')
-    parser.add_argument('--save_freq', type=int, default=500)
-    parser.add_argument('--checkpoint_dir', type=str, default='/home/checkpoints')
+    parser.add_argument('--save_freq', type=int, default=1000)
+    parser.add_argument('--checkpoint_dir', type=str, default='/home/checkpoints/')
     parser.add_argument('--splits_path', type=str, default='./data/bench_splits.json')
 
     # Options for testing
     parser.add_argument('--load_dir', type=str, default=None)
     parser.add_argument('--results_dir', type=str, default='./results', help='path to save results to')
     args = parser.parse_args()
+
+    wandb.init(project='3d-recon', entity='3drecon2')
 
     evaluate()

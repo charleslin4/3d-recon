@@ -125,30 +125,32 @@ def compute_extrinsic_matrix(azimuth, elevation, distance):
     return RT
 
 
-def get_blender_intrinsic_matrix(N=None):
+def compute_camera_calibration(RT):
     """
-    This is the (default) matrix that blender uses to map from camera coordinates
-    to normalized device coordinates. We can extract it from Blender like this:
-    import bpy
-    camera = bpy.data.objects['Camera']
-    render = bpy.context.scene.render
-    K = camera.calc_matrix_camera(
-         render.resolution_x,
-         render.resolution_y,
-         render.pixel_aspect_x,
-         render.pixel_aspect_y)
-    Adapted from https://github.com/facebookresearch/meshrcnn/blob/df9617e9089f8d3454be092261eead3ca48abc29/shapenet/utils/coords.py.
+    Helper function for calculating rotation and translation matrices from ShapeNet
+    to camera transformation and ShapeNet to PyTorch3D transformation.
+    Args:
+        RT: Extrinsic matrix that performs ShapeNet world view to camera view
+            transformation.
+    Returns:
+        R: Rotation matrix of shape (3, 3).
+        T: Translation matrix of shape (3).
     """
-    K = [
-        [2.1875, 0.0, 0.0, 0.0],
-        [0.0, 2.1875, 0.0, 0.0],
-        [0.0, 0.0, -1.002002, -0.2002002],
-        [0.0, 0.0, -1.0, 0.0],
-    ]
-    K = torch.tensor(K)
-    if N is not None:
-        K = K.view(1, 4, 4).expand(N, 4, 4)
-    return K
+    # Transform the mesh vertices from shapenet world to pytorch3d world.
+    shapenet_to_pytorch3d = torch.tensor(
+        [
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=torch.float32,
+    )
+    RT = torch.transpose(RT, 0, 1).mm(shapenet_to_pytorch3d)  # (4, 4)
+    # Extract rotation and translation matrices from RT.
+    R = RT[:3, :3]
+    T = RT[3, :3]
+    return R, T
 
 
 def rotate_verts(RT, verts):
@@ -177,10 +179,6 @@ def rotate_verts(RT, verts):
 
 
 def save_point_clouds(id, ptclds_pred, ptclds_gt, results_dir):
-    #torch.save(pc_padded, obj_file)
-    #imageio.imsave(img_file, format_image(img))
-    #imageio.imsave(img_gt_file, format_image(img_gt))
-
     #deprocess = imagenet_deprocess(rescale_image=False)
     #ptclds_img = deprocess(ptclds_img)
     ptcld_obj_file = os.path.join(results_dir, '%s.pth' % id)
@@ -189,9 +187,9 @@ def save_point_clouds(id, ptclds_pred, ptclds_gt, results_dir):
     ptclds_gt_obj_file = os.path.join(results_dir, '%s_gt.pth' % id)
     torch.save(ptclds_gt, ptclds_gt_obj_file)
     
-    ptclds_img = ptclds_pred[0].detach().cpu().numpy()
-    ptcld_img_file = os.path.join(results_dir, '%s.png' % id)
-    imageio.imsave(ptcld_img_file, ptclds_img)
+    #ptclds_img = format_image(ptclds_pred[0])
+    #ptcld_img_file = os.path.join(results_dir, '%s.png' % id)
+    #imageio.imsave(ptcld_img_file, ptclds_img)
 
 
 def format_image(images):
