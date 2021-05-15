@@ -2,19 +2,15 @@ import os
 import argparse
 import numpy as np
 import csv
-from collections import defaultdict
+import pdb, traceback, sys
 
 import torch
-from torch.utils.data import DataLoader
-from pytorch3d.datasets import R2N2, collate_batched_R2N2
-from pytorch3d.structures import Meshes, Pointclouds
-from pytorch3d.loss import chamfer
-from pytorch3d.ops import sample_points_from_meshes, knn_points
+from pytorch3d.loss import chamfer_distance
+from pytorch3d.ops import knn_points
 
 from dataloader import build_data_loader
 from pointalign import PointAlign
 from utils import save_point_clouds, format_image, rotate_verts, imagenet_deprocess
-import wandb
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 POINT_CLOUD_SIZE = 10000
@@ -49,8 +45,8 @@ def compute_min_cham_dist(ptclds_set, ptcld_gt):
     '''
 
     num_samples = ptclds_set._N
-    ptcld_gt_set = ptcld_gt.repeat(num_samples, 1, 1)  # reshape into (N, P, D)
-    cds, _ = chamfer_distance(pc_set, ptcld_gt_set, batch_reduction=None)
+    ptclds_gt = ptcld_gt.repeat(num_samples, 1, 1)  # reshape into (N, P, D)
+    cds, _ = chamfer_distance(ptclds_set, ptclds_gt, batch_reduction=None)
     min_cd = cds.min()
     return min_cd
 
@@ -58,7 +54,7 @@ def compute_min_cham_dist(ptclds_set, ptcld_gt):
 def compute_cham_dist(metrics, ptclds1, ptclds2):
     '''
     Computes the sum of the mean Chamfer Distance between two batches of point clouds.
-    Stores in metrics.
+    Stores the batch sum of Chamfer Distances in metrics.
 
     Inputs:
         metrics: dict storing all test metrics
@@ -68,23 +64,24 @@ def compute_cham_dist(metrics, ptclds1, ptclds2):
             with at most P2 points in each batch element, batch size N, and feature dimension D.
     '''
     
-    breakpoint()
     cham_dist = chamfer_distance(ptclds1, ptclds2, batch_reduction=None, point_reduction="mean")
-    metrics["Chamfer"] += cham_dist #check shape: should be (N,) where N is batch size
+    metrics["Chamfer"] = cham_dist[0].sum(axis=0)
     
     return
 
 
-def compute_f1_scores(metrics, ptclds_pred, ptclds_gt, thresholds, eps):
+def compute_f1_scores(metrics, ptclds_pred, ptclds_gt, thresholds=[0.1, 0.2, 0.3, 0.4, 0.5], eps=1e-8):
     '''
     Computes F1 scores between each pair of predicted and ground-truth point clouds at the given thresholds.
-    Stores in metrics.
+    Stores the batch sum of F1 scores in metrics.
 
     Inputs:
         ptclds_pred: Tensor of shape (N, S, 3) giving coordinates for each predicted point cloud
         ptclds_gt: Tensor of shape (N, S, 3) giving coordinates for each ground-truth point cloud
         thresholds: distance thresholds to use when computing F1 scores
         eps: small number to handle numerically instability issues
+
+    Returns:
         metrics: dict storing all test metrics
     
     Adapted from https://github.com/facebookresearch/meshrcnn/blob/df9617e9089f8d3454be092261eead3ca48abc29/meshrcnn/utils/metrics.py
@@ -108,7 +105,7 @@ def compute_f1_scores(metrics, ptclds_pred, ptclds_gt, thresholds, eps):
         precision = 100.0 * (pred_to_gt_dists < t).float().mean(dim=1) #(N,)
         recall = 100.0 * (gt_to_pred_dists < t).float().mean(dim=1) #(N,)
         f1 = (2.0 * precision * recall) / (precision + recall + eps) #(N,)
-        metrics["F1@%f" % t] = f1 #is N the number of classes or batch size? if batchsize, do f1.sum(axis=0)
+        metrics["F1@%f" % t] = f1.sum(axis=0)
     
     return
 
@@ -117,18 +114,28 @@ def compute_mean_iou():
     pass
 
 
-def compute_metrics(ptclds_pred, ptclds_gt, thresholds=[0.1, 0.2, 0.3, 0.4, 0.5], eps=1e-8, reduce=True):
+def compute_metrics(ptclds_pred, ptclds_gt):
     '''
+    Inputs:
+        ptclds_pred: Tensor of shape (N, S, 3) giving coordinates for each predicted point cloud
+        ptclds_gt: Tensor of shape (N, S, 3) giving coordinates for each ground-truth point cloud
+        thresholds: distance thresholds to use when computing F1 scores
+        eps: small number to handle numerically instability issues
+
+
+    Returns:
+        metrics:
+
     Adapted from https://github.com/facebookresearch/meshrcnn/blob/df9617e9089f8d3454be092261eead3ca48abc29/meshrcnn/utils/metrics.py
     '''
     metrics = {}
-    compute_f1_scores(metrics, ptclds_pred, ptclds_gt, thresholds, eps)
     compute_cham_dist(metrics, ptclds_pred, ptclds_gt)
+    compute_f1_scores(metrics, ptclds_pred, ptclds_gt)
     metrics = {k: v.cpu() for k, v in metrics.items()}
 
     return metrics
 
-
+# TODO render point clouds (see render_point_clouds notebook)
 def render_ptcld(ptcld):
     '''
     Renders a single 3D point cloud.
@@ -144,6 +151,12 @@ def render_ptcld(ptcld):
 
 
 def evaluate():
+    '''
+    Tests the model and saves metrics and point cloud predictions.
+
+    Adapted from https://github.com/facebookresearch/meshrcnn/blob/df9617e9089f8d3454be092261eead3ca48abc29/shapenet/evaluation/eval.py
+    '''
+
     results_dir = os.path.join(args.results_dir, f'{args.model_name}')
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
@@ -160,7 +173,7 @@ def evaluate():
         multigpu=False,
         shuffle=True,
         num_samples=None
-    ) # edit this later
+    )
 
     if args.model_name == 'baseline':
         model = PointAlign().to(DEVICE)
@@ -169,49 +182,40 @@ def evaluate():
         pass
     else:
         raise ValueError("Model [%s] not recognized." % args.model)
-    checkpoint = torch.load(os.path.join(args.checkpoint_dir, 'baseline_model_41400.pth')) # edit this later
+    checkpoint = torch.load(os.path.join(args.checkpoint_dir, args.checkpoint_name))
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 
-    num_instances = {i: 0 for i in class_names}
-    chamfer = {i: 0 for i in class_names}
-    f1_01 = {i: 0 for i in class_names}
-    f1_03 = {i: 0 for i in class_names}
-    f1_05 = {i: 0 for i in class_names}
-    num_test = 0
+    if not args.small_dataset:
+        syn_ids = [syn_id for syn_id in class_names.keys()]
+    else:
+        syn_ids = ['02828884']
+    num_instances = {syn_id: 0 for syn_id in syn_ids}
+    chamfer = {syn_id: 0 for syn_id in syn_ids}
+    f1_01 = {syn_id: 0 for syn_id in syn_ids}
+    f1_03 = {syn_id: 0 for syn_id in syn_ids}
+    f1_05 = {syn_id: 0 for syn_id in syn_ids}
+    
     with torch.no_grad():
         for batch_idx, batch in enumerate(test_loader):
-            if batch_idx == 3:
-                return
-            breakpoint()
             images, _, ptclds_gt, normals, RT, K, id_strs = test_loader.postprocess(batch)
-            num_test += images.shape[0]
-            syn_ids = [id_str.split("-")[0] for id_str in id_strs]
-            #syn_id = '02828884'
             for syn_id in syn_ids:
-                num_instances[syn_id] += 1
+                num_instances[syn_id] += len(images)
             
-            breakpoint()
-            ptclds_pred, textures_pred = model(images)
+            ptclds_pred = model(images)
             ptclds_gt_cam = rotate_verts(RT, ptclds_gt)
-            cur_metrics = compute_metrics(ptclds_pred, ptclds_gt_cam) #get metrics for gt in camera coords?
+            cur_metrics = compute_metrics(ptclds_pred, ptclds_gt_cam) # compute metrics for gt in camera coordinates?
 
             for i, syn_id in enumerate(syn_ids):
-                breakpoint()
-                chamfer[syn_id] += cur_metrics["Chamfer"]
-                f1_01[syn_id] += cur_metrics["F1@%f" % 0.1]
-                f1_03[syn_id] += cur_metrics["F1@%f" % 0.3]
-                f1_05[syn_id] += cur_metrics["F1@%f" % 0.5]
+                chamfer[syn_id] += cur_metrics['Chamfer'].item()
+                f1_01[syn_id] += cur_metrics['F1@%f' % 0.1].item()
+                f1_03[syn_id] += cur_metrics['F1@%f' % 0.3].item()
+                f1_05[syn_id] += cur_metrics['F1@%f' % 0.5].item()
 
+            # TODO periodically save rendered point clouds
             #if num_test % args.save_freq == 0:
                 #for i, sid in enumerate(sids):
                     #save_point_clouds(id_strs[i] + str(num_test), ptclds_pred, ptclds_gt_cam, results_dir)
-                    #deprocess_transform = imagenet_deprocess()
-                    #wandb.log({
-                        #'image': wandb.Image(deprocess_transform(images)[0].permute(1, 2, 0).cpu().numpy()),
-                        #'pt_cloud/pred': wandb.Object3D(ptclds_pred[0].detach().cpu().numpy()),
-                        #'pt_cloud/gt': wandb.Object3D(ptclds_gt_cam[0].detach().cpu().numpy())
-                        #})
     
         col_headers = class_names.values()
         chamfer_final = {class_names[syn_id] : cham_dist/num_instances[syn_id] for syn_id, cham_dist in chamfer.items()}
@@ -224,6 +228,7 @@ def evaluate():
             writer.writeheader()
             writer.writerows(metrics)
 
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
@@ -231,14 +236,14 @@ if __name__ == "__main__":
     parser.add_argument('--bs', type=int, default=32, help='batch size')
     parser.add_argument('--data_dir', type=str, default='/home/data/ShapeNet/ShapeNetV1processed')
     parser.add_argument('--save_freq', type=int, default=1000)
-    parser.add_argument('--checkpoint_dir', type=str, default='/home/checkpoints/')
+    parser.add_argument('--checkpoint_dir', type=str, default='/home/clin/cs231n-project/outputs/2021-05-15/21-07-32/checkpoints/')
+    parser.add_argument('--checkpoint_name', type=str, default='PointAlign_2021-05-15.21-05-32_model_0.pth')
     parser.add_argument('--splits_path', type=str, default='./data/bench_splits.json')
+    parser.add_argument('--small_dataset', type=bool, default=True)
 
     # Options for testing
     parser.add_argument('--load_dir', type=str, default=None)
     parser.add_argument('--results_dir', type=str, default='./results', help='path to save results to')
     args = parser.parse_args()
-
-    wandb.init(project='3d-recon', entity='3drecon2')
 
     evaluate()
