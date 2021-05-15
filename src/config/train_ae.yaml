@@ -4,7 +4,7 @@ seed: 321
 data_dir: /home/data/ShapeNet/ShapeNetV1processed
 bs: 64
 epochs: 20
-lr: 1.0e-3
+lr: 5.0e-4
 save_freq: 1000
 checkpoint_dir: checkpoints
 splits_path: dataset/bench_splits.json

@@ -16,6 +16,7 @@ from models.pointalign import PointAlign, PointAlignSmall
 from datautils.dataloader import build_data_loader
 import utils
 
+torch.multiprocessing.set_sharing_strategy('file_system')  # Potential fix to 'received 0 items of ancdata' error
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
@@ -38,7 +39,8 @@ def train(config):
     ae.to(DEVICE)
     opt = torch.optim.Adam(ae.parameters(), lr=config.lr)
 
-    wandb.init(name=model_name, project='3d-recon', entity='3drecon2')
+    wandb.init(name=model_name, config=config, project='3d-recon', entity='3drecon2')
+    wandb.watch(ae)
 
     global_iter = 0
     for epoch in range(config.epochs):
@@ -128,7 +130,7 @@ def train(config):
 
             val_loss = total_val_loss / len(val_loader.dataset)
             print("Epoch {} Validation\tLoss: {:.2f}".format(epoch, val_loss))
-            wandb.log({'loss/val': val_loss})
+            wandb.log({'step': global_iter, 'loss/val': val_loss})
 
         print(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')
         utils.save_checkpoint_model(ae, model_name, epoch, loss, checkpoint_dir, global_iter)

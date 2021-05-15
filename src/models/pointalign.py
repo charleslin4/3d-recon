@@ -116,7 +116,7 @@ class PointAlignSmall(nn.Module):
         super().__init__()
 
         self.encoder, feat_dims = build_backbone('resnet18', pretrained=True)
-        self.decoder = SmallDecoder(points, feat_dims[-1], 256)
+        self.decoder = SmallDecoder(points, feat_dims[-1], 128)
 
     def forward(self, images, P=None):
         z = self.encoder(images)[-1]
