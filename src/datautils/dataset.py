@@ -24,6 +24,7 @@ class MeshPCDataset(Dataset):
         return_mesh=False,
         num_samples=10000,
         sample_online=False,
+        return_normals=True,
         in_memory=False,
         return_id_str=False,
     ):
@@ -35,6 +36,7 @@ class MeshPCDataset(Dataset):
         self.return_mesh = return_mesh
         self.num_samples = num_samples
         self.sample_online = sample_online
+        self.return_normals = return_normals
         self.return_id_str = return_id_str
 
         self.synset_ids = []
@@ -120,11 +122,13 @@ class MeshPCDataset(Dataset):
                 with PathManager.open(samples_path, "rb") as f:
                     samples = torch.load(f)
             points = samples["points_sampled"]
-            normals = samples["normals_sampled"]
+            normals = samples["normals_sampled"] if self.return_normals else None
             idx = torch.randperm(points.shape[0])[: self.num_samples]
-            points, normals = points[idx], normals[idx]
+            points = points[idx]
             points = project_verts(points, RT)
-            normals = normals.mm(RT[:3, :3].t())  # Only rotate, don't translate
+            if normals is not None:
+                normals = normals[idx]
+                normals = normals.mm(RT[:3, :3].t())  # Only rotate, don't translate
 
         id_str = "%s-%s-%02d" % (sid, mid, iid)
         return img, verts, faces, points, normals, RT, K, id_str
@@ -139,11 +143,14 @@ class MeshPCDataset(Dataset):
             meshes = Meshes(verts=list(verts), faces=list(faces))
         else:
             meshes = None
-        if points[0] is not None and normals[0] is not None:
+        if points[0] is not None:
             points = torch.stack(points, dim=0)
+        else:
+            points = None
+        if normals[0] is not None:
             normals = torch.stack(normals, dim=0)
         else:
-            points, normals = None, None
+            normals = None
         return imgs, meshes, points, normals, RT, K, id_strs
 
 
@@ -154,13 +161,23 @@ class MeshPCDataset(Dataset):
         imgs = imgs.to(device)
         if meshes is not None:
             meshes = meshes.to(device)
-        if points is not None and normals is not None:
-            points = points.to(device)
-            normals = normals.to(device)
+        if self.return_normals:
+            if points is not None and normals is not None:
+                points = points.to(device)
+                normals = normals.to(device)
+            else:
+                points, normals = sample_points_from_meshes(
+                    meshes, num_samples=self.num_samples, return_normals=True
+                )
         else:
-            points, normals = sample_points_from_meshes(
-                meshes, num_samples=self.num_samples, return_normals=True
-            )
+            if points is not None:
+                points = points.to(device)
+                normals = None
+            else:
+                points = sample_points_from_meshes(
+                    meshes, num_samples=self.num_samples, return_normals=False
+                )
+                normals = None
         if RT is not None:
             RT = torch.stack(RT, 0).to(device)
         if K is not None:

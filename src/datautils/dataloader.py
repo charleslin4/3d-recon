@@ -25,7 +25,7 @@ def build_data_loader(
     num_samples=None
 ):
 
-    return_mesh, sample_online, return_id_str = False, False, False
+    return_mesh, sample_online, return_normals, return_id_str = False, False, False, False
     if split_name in ["train_eval", "val"]:
         return_mesh = True
         sample_online = True
@@ -54,6 +54,7 @@ def build_data_loader(
             num_samples=10000,
             return_mesh=return_mesh,
             sample_online=sample_online,
+            return_normals=return_normals,
             return_id_str=return_id_str,
         )
     collate_fn = MeshPCDataset.collate_fn

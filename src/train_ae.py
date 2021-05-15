@@ -54,47 +54,82 @@ def train(config):
             num_samples=None
         )
 
+        ae.train()
         for batch_idx, batch in enumerate(train_loader):
-            images, _, ptclds_gt, normals, RT, K = train_loader.postprocess(batch)
+            images, meshes, ptclds_gt, normals, RT, K = train_loader.postprocess(batch)  # meshes, normals = None
             batch_size = images.shape[0]
             opt.zero_grad()
             ae.train()
 
             loss = 0.0
-            info_dict = {}
+            info_dict = {'step': global_iter}
 
             ptclds_pred = ae(images, RT)
             l_rec, _ = chamfer_distance(ptclds_gt, ptclds_pred)
             l_rec.backward()
-            info_dict['l_rec'] = l_rec.item()
+            info_dict['loss/rec'] = l_rec.item()
             loss += l_rec.item()
 
             if config.vq:
                 # TODO Add additional VQ-VAE loss terms here
                 pass
 
-            info_dict['loss'] = loss
+            info_dict['loss/train'] = loss
 
             grads = nn.utils.clip_grad_norm_(ae.parameters(), 50)
-            info_dict['grads'] = grads
-            opt.step()
+            info_dict['grads'] = grads.item()
 
-            print("Epoch {}\tTrain step {}\tLoss: {:.2f}".format(epoch, batch_idx, loss))
-            wandb.log(info_dict)
-
-            if batch_idx % 250 == 0:
-                wandb.log({
+            if global_iter % 250 == 0:
+                info_dict.update({
                     'image': wandb.Image(deprocess_transform(images)[0].permute(1, 2, 0).cpu().numpy()),
                     'pt_cloud/pred': wandb.Object3D(ptclds_pred[0].detach().cpu().numpy()),
                     'pt_cloud/gt': wandb.Object3D(ptclds_gt[0].detach().cpu().numpy())
                 })
+
+            print("Epoch {}\tTrain step {}\tLoss: {:.2f}".format(epoch, batch_idx, loss))
+            wandb.log(info_dict)
+
+            opt.step()
 
             if global_iter % config.save_freq == 0:
                 print(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')
                 utils.save_checkpoint_model(ae, model_name, epoch, loss, checkpoint_dir, global_iter)
             
             global_iter += 1
-            
+
+        val_loader = build_data_loader(
+            data_dir=config.data_dir,
+            split_name='val',
+            splits_file=splits_path,
+            batch_size=config.bs,
+            num_workers=4,
+            multigpu=False,
+            shuffle=True,
+            num_samples=None
+        )
+
+        ae.eval()
+        with torch.no_grad():
+            total_val_loss = 0.0
+            for batch_idx, batch in enumerate(val_loader):
+                images, meshes, ptclds_gt, normals, RT, K = val_loader.postprocess(batch)  # meshes, normals = None
+                batch_size = images.shape[0]
+
+                loss = 0.0
+                ptclds_pred = ae(images, RT)
+                l_rec, _ = chamfer_distance(ptclds_gt, ptclds_pred)
+                loss += l_rec.item()
+
+                if config.vq:
+                    # TODO Add additional VQ-VAE loss terms here
+                    pass
+
+                total_val_loss += loss * batch_size
+
+            val_loss = total_val_loss / len(val_loader.dataset)
+            print("Epoch {} Validation\tLoss: {:.2f}".format(epoch, val_loss))
+            wandb.log({'loss/val': val_loss})
+
         print(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')
         utils.save_checkpoint_model(ae, model_name, epoch, loss, checkpoint_dir, global_iter)
 
