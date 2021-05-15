@@ -1,15 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision
-from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 
 from pytorch3d.datasets.r2n2.utils import project_verts
-from pytorch3d.structures import Pointclouds
 from pytorch3d.ops import vert_align
 
-import numpy as np
-import utils
 from models.backbone import build_backbone
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'

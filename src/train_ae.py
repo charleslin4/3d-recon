@@ -1,7 +1,6 @@
 import os
 import random
 import numpy as np
-from datetime import datetime
 
 import torch
 import torch.nn as nn
@@ -26,8 +25,9 @@ def train(config):
     orig_dir = hydra.utils.get_original_cwd()
 
     # NOTE This is all sort of janky, since we have a shared data directory on the Google Cloud VM.
-    timestamp = datetime.now().strftime("%Y-%m-%d.%H-%m-%S")
-    model_name = f'{config.model}_vq_{timestamp}' if config.vq else f'{config.model}_{timestamp}'
+    model_name = config.model
+    if config.vq:
+        model_name += '_vq'
     checkpoint_dir = os.path.join(run_dir, config.checkpoint_dir)  # Save checkpoints to run directory
 
     points_path = os.path.join(orig_dir, config.points_path)  # Load points from original path

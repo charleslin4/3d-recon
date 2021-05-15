@@ -39,7 +39,7 @@ def imagenet_deprocess(rescale_image=True):
 def save_checkpoint_model(model, model_name, epoch, loss, checkpoint_dir, total_iters):
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
-    save_filename = '%s_model_%s.pth' % (model_name, total_iters)
+    save_filename = f'{model_name}_epoch{epoch}_step{total_iters}.pth'
     save_path = os.path.join(checkpoint_dir, save_filename)
     torch.save({
         'epoch': epoch,
