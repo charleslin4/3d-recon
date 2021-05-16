@@ -5,6 +5,7 @@
 * `torchvision==0.8.2`
 * `pytorch3d==0.4.0`
 * `wandb`
+* `hydra-core`
 
 
 After installing Pytorch3D, run the following:

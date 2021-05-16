@@ -1,20 +1,19 @@
 import os
-import copy
 import torch
 import torchvision.transforms as T
 import math
 import imageio
-import numpy
 
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.utils import ico_sphere
-from pytorch3d.structures import Meshes
+
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
 
 INV_IMAGENET_MEAN = [-m for m in IMAGENET_MEAN]
 INV_IMAGENET_STD = [1.0 / s for s in IMAGENET_STD]
+
 
 def imagenet_preprocess():
     return T.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
@@ -38,7 +37,7 @@ def imagenet_deprocess(rescale_image=True):
 def save_checkpoint_model(model, model_name, epoch, loss, checkpoint_dir, total_iters):
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
-    save_filename = '%s_model_%s.pth' % (model_name, total_iters)
+    save_filename = f'{model_name}_epoch{epoch}_step{total_iters}.pth'
     save_path = os.path.join(checkpoint_dir, save_filename)
     torch.save({
         'epoch': epoch,

@@ -1,0 +1,14 @@
+# @package _global_
+
+seed: 321
+data_dir: /home/data/ShapeNet/ShapeNetV1processed
+bs: 64
+epochs: 20
+lr: 5.0e-4
+save_freq: 1000
+splits_path: dataset/bench_splits.json
+points_path: data/point_sphere.pt
+model: PointAlignSmall
+
+vq: False
+
