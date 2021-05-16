@@ -1,4 +1,5 @@
 import os
+import random
 import argparse
 import numpy as np
 import csv
@@ -225,6 +226,10 @@ if __name__ == "__main__":
     initialize_config_dir(config_dir=config_dir, job_name='evaluate')
     config = compose(config_name='config', overrides=[f"+run_dir={run_dir}", f"+checkpoint_path={checkpoint_path}"])
     print(OmegaConf.to_yaml(config))
+
+    random.seed(config.seed)
+    np.random.seed(config.seed)
+    torch.manual_seed(config.seed)
 
     evaluate(config)
 
