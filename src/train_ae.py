@@ -1,6 +1,7 @@
 import os
 import random
 import numpy as np
+from datetime import datetime
 
 import torch
 import torch.nn as nn
@@ -38,7 +39,8 @@ def train(config):
     ae.to(DEVICE)
     opt = torch.optim.Adam(ae.parameters(), lr=config.lr)
 
-    wandb.init(name=model_name, config=config, project='3d-recon', entity='3drecon2')
+    timestamp = datetime.now().strftime("%Y-%m-%d.%H-%m-%S")
+    wandb.init(name=f'{model_name}_{timestamp}', config=config, project='3d-recon', entity='3drecon2')
     wandb.watch(ae)
 
     global_iter = 0
