@@ -4,7 +4,7 @@ import os
 import torch
 from fvcore.common.file_io import PathManager
 from pytorch3d.ops import sample_points_from_meshes
-from pytorch3d.structures import Meshes, Pointclouds
+from pytorch3d.structures import Meshes
 from pytorch3d.datasets.r2n2.utils import project_verts
 from torch.utils.data import Dataset
 

@@ -1,14 +1,12 @@
 import os
-import copy
 import torch
 import torchvision.transforms as T
 import math
 import imageio
-import numpy
 
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.utils import ico_sphere
-from pytorch3d.structures import Meshes
+
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]

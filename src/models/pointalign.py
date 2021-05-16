@@ -15,7 +15,9 @@ class Decoder(nn.Module):
     def __init__(self, points, img_feat_dim=2048, hidden_dim=512):
         super().__init__()
 
-        self.points = points.to(DEVICE)
+        if points is None:
+            points = torch.zeros((1, 10000, 3))
+        self.register_buffer('points', points)
 
         self.bottleneck = nn.Linear(img_feat_dim, hidden_dim)
         self.fc1 = nn.Linear(hidden_dim + 3, hidden_dim)
@@ -26,9 +28,6 @@ class Decoder(nn.Module):
 
     def forward(self, x, P=None):
         point_spheres = self.points.repeat(x.shape[0], 1, 1)
-
-        if P is not None:
-            point_spheres = project_verts(point_spheres, P)
 
         device, dtype = point_spheres.device, point_spheres.dtype
         factor = torch.tensor([1, -1, 1], device=device, dtype=dtype).view(1, 1, 3)
@@ -56,10 +55,12 @@ class Decoder(nn.Module):
 
 class SmallDecoder(nn.Module):
 
-    def __init__(self, points, img_feat_dim=512, hidden_dim=256):
+    def __init__(self, points=None, img_feat_dim=512, hidden_dim=256):
         super().__init__()
 
-        self.points = points.to(DEVICE)
+        if points is None:
+            points = torch.zeros((1, 10000, 3))
+        self.register_buffer('points', points)
 
         self.bottleneck = nn.Linear(img_feat_dim, hidden_dim)
         self.fc = nn.Linear(hidden_dim + 3, hidden_dim)
@@ -92,7 +93,7 @@ class SmallDecoder(nn.Module):
 
 class PointAlign(nn.Module):
 
-    def __init__(self, points):
+    def __init__(self, points=None):
         super().__init__()
 
         self.encoder, feat_dims = build_backbone('resnet50', pretrained=True)
@@ -100,14 +101,14 @@ class PointAlign(nn.Module):
 
     def forward(self, images, P=None):
         z = self.encoder(images)[-1]
-        points = self.decoder(z, P)
+        ptclds = self.decoder(z, P)
 
-        return points
+        return ptclds
 
 
 class PointAlignSmall(nn.Module):
     
-    def __init__(self, points):
+    def __init__(self, points=None):
         super().__init__()
 
         self.encoder, feat_dims = build_backbone('resnet18', pretrained=True)
@@ -115,7 +116,7 @@ class PointAlignSmall(nn.Module):
 
     def forward(self, images, P=None):
         z = self.encoder(images)[-1]
-        points = self.decoder(z, P)
+        ptclds = self.decoder(z, P)
 
-        return points
+        return ptclds
 

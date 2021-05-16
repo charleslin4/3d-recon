@@ -2,18 +2,22 @@ import os
 import argparse
 import numpy as np
 import csv
-import pdb, traceback, sys
+import json
 
 import torch
 from pytorch3d.loss import chamfer_distance
 from pytorch3d.ops import knn_points
 
-from dataloader import build_data_loader
-from pointalign import PointAlign
-from utils import save_point_clouds, format_image, rotate_verts, imagenet_deprocess
+from omegaconf import DictConfig, OmegaConf
+from hydra.experimental import compose, initialize_config_dir
 
+from datautils.dataloader import build_data_loader
+from models.pointalign import PointAlign, PointAlignSmall
+import utils
+
+
+torch.multiprocessing.set_sharing_strategy('file_system')  # Potential fix to 'received 0 items of ancdata' error
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-POINT_CLOUD_SIZE = 10000
 class_names = {
     "02828884": "bench",
     "03001627": "chair",
@@ -31,26 +35,6 @@ class_names = {
 }
 
 
-def compute_min_cham_dist(ptclds_set, ptcld_gt):
-    '''
-    Computes the minimum Chamfer Distance between a ground truth
-    Pointclouds object and a set of generated Pointclouds objects.
-
-    Inputs:
-        ptclds_set: a list of Pointclouds objects
-        ptcld_gt: a single Pointclouds object
-
-    Returns:
-        min_cham_dist: minimum Chamfer Distance
-    '''
-
-    num_samples = ptclds_set._N
-    ptclds_gt = ptcld_gt.repeat(num_samples, 1, 1)  # reshape into (N, P, D)
-    cds, _ = chamfer_distance(ptclds_set, ptclds_gt, batch_reduction=None)
-    min_cd = cds.min()
-    return min_cd
-
-
 def compute_cham_dist(metrics, ptclds1, ptclds2):
     '''
     Computes the sum of the mean Chamfer Distance between two batches of point clouds.
@@ -64,8 +48,8 @@ def compute_cham_dist(metrics, ptclds1, ptclds2):
             with at most P2 points in each batch element, batch size N, and feature dimension D.
     '''
     
-    cham_dist = chamfer_distance(ptclds1, ptclds2, batch_reduction=None, point_reduction="mean")
-    metrics["Chamfer"] = cham_dist[0].sum(axis=0)
+    cham_dist, _ = chamfer_distance(ptclds1, ptclds2, batch_reduction='sum', point_reduction="mean")
+    metrics["Chamfer"] = cham_dist
     
     return
 
@@ -110,10 +94,6 @@ def compute_f1_scores(metrics, ptclds_pred, ptclds_gt, thresholds=[0.1, 0.2, 0.3
     return
 
 
-def compute_mean_iou():
-    pass
-
-
 def compute_metrics(ptclds_pred, ptclds_gt):
     '''
     Inputs:
@@ -150,51 +130,54 @@ def render_ptcld(ptcld):
     return
 
 
-def evaluate():
+def evaluate(config: DictConfig):
     '''
     Tests the model and saves metrics and point cloud predictions.
 
     Adapted from https://github.com/facebookresearch/meshrcnn/blob/df9617e9089f8d3454be092261eead3ca48abc29/shapenet/evaluation/eval.py
     '''
 
-    results_dir = os.path.join(args.results_dir, f'{args.model_name}')
+    orig_dir = os.getcwd()
+    results_dir = os.path.join(config.run_dir, 'results')  # Save checkpoints to run directory
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
+
     metrics_file = os.path.join(results_dir, 'metrics.csv')
-    print("\nPoint clouds will be saved in: " + results_dir)
+    print("Point clouds will be saved in: " + results_dir)
     print("Metrics will be written to: " + metrics_file)
 
+    splits_path = os.path.join(orig_dir, config.splits_path)  # Load splits from original path
     test_loader = build_data_loader(
-        data_dir=args.data_dir,
+        data_dir=config.data_dir,
         split_name='test',
-        splits_file=args.splits_path,
-        batch_size=args.bs,
+        splits_file=splits_path,
+        batch_size=config.bs,
         num_workers=4,
         multigpu=False,
         shuffle=True,
         num_samples=None
     )
 
-    if args.model_name == 'baseline':
-        model = PointAlign().to(DEVICE)
-    elif args.model_name == 'vq-vae':
-        # model = 
-        pass
+    if config.vq:
+        raise NotImplementedError
     else:
-        raise ValueError("Model [%s] not recognized." % args.model)
-    checkpoint = torch.load(os.path.join(args.checkpoint_dir, args.checkpoint_name))
+        model = PointAlign() if config.model == 'PointAlign' else PointAlignSmall()
+    model.to(DEVICE)
+
+    checkpoint = torch.load(config.checkpoint_path)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 
-    if not args.small_dataset:
-        syn_ids = [syn_id for syn_id in class_names.keys()]
-    else:
-        syn_ids = ['02828884']
+    splits = json.load(open(splits_path, "r"))
+    syn_ids = [syn_id for syn_id in splits['test'].keys()]
+
     num_instances = {syn_id: 0 for syn_id in syn_ids}
     chamfer = {syn_id: 0 for syn_id in syn_ids}
     f1_01 = {syn_id: 0 for syn_id in syn_ids}
     f1_03 = {syn_id: 0 for syn_id in syn_ids}
     f1_05 = {syn_id: 0 for syn_id in syn_ids}
+
+    print("Starting evaluation")
     
     with torch.no_grad():
         for batch_idx, batch in enumerate(test_loader):
@@ -203,8 +186,7 @@ def evaluate():
                 num_instances[syn_id] += len(images)
             
             ptclds_pred = model(images)
-            ptclds_gt_cam = rotate_verts(RT, ptclds_gt)
-            cur_metrics = compute_metrics(ptclds_pred, ptclds_gt_cam) # compute metrics for gt in camera coordinates?
+            cur_metrics = compute_metrics(ptclds_pred, ptclds_gt)
 
             for i, syn_id in enumerate(syn_ids):
                 chamfer[syn_id] += cur_metrics['Chamfer'].item()
@@ -215,9 +197,9 @@ def evaluate():
             # TODO periodically save rendered point clouds
             #if num_test % args.save_freq == 0:
                 #for i, sid in enumerate(sids):
-                    #save_point_clouds(id_strs[i] + str(num_test), ptclds_pred, ptclds_gt_cam, results_dir)
+                    #utils.save_point_clouds(id_strs[i] + str(num_test), ptclds_pred, ptclds_gt_cam, results_dir)
     
-        col_headers = class_names.values()
+        col_headers = [class_names[syn_id] for syn_id in syn_ids]
         chamfer_final = {class_names[syn_id] : cham_dist/num_instances[syn_id] for syn_id, cham_dist in chamfer.items()}
         f1_01_final = {class_names[syn_id] : f1_01/num_instances[syn_id] for syn_id, f1_01 in f1_01.items()}
         f1_03_final = {class_names[syn_id] : f1_03/num_instances[syn_id] for syn_id, f1_03 in f1_03.items()}
@@ -230,20 +212,19 @@ def evaluate():
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_name', type=str, default='baseline', help='baseline or vq-vae')
-    parser.add_argument('--bs', type=int, default=32, help='batch size')
-    parser.add_argument('--data_dir', type=str, default='/home/data/ShapeNet/ShapeNetV1processed')
-    parser.add_argument('--save_freq', type=int, default=1000)
-    parser.add_argument('--checkpoint_dir', type=str, default='/home/clin/cs231n-project/outputs/2021-05-15/21-07-32/checkpoints/')
-    parser.add_argument('--checkpoint_name', type=str, default='PointAlign_2021-05-15.21-05-32_model_0.pth')
-    parser.add_argument('--splits_path', type=str, default='./data/bench_splits.json')
-    parser.add_argument('--small_dataset', type=bool, default=True)
-
-    # Options for testing
-    parser.add_argument('--load_dir', type=str, default=None)
-    parser.add_argument('--results_dir', type=str, default='./results', help='path to save results to')
+    parser.add_argument('-C', '--checkpoint_path', type=str, help='(Relative or absolute) path of the checkpoint')
     args = parser.parse_args()
 
-    evaluate()
+    checkpoint_path = os.path.abspath(args.checkpoint_path)
+    checkpoint = os.path.basename(checkpoint_path)  # /path/to/run_dir/checkpoints/checkpoint.pth
+    checkpoints_dir = os.path.dirname(checkpoint_path)
+    run_dir = os.path.dirname(checkpoints_dir)
+
+    config_dir = os.path.join(run_dir, '.hydra')
+    initialize_config_dir(config_dir=config_dir, job_name='evaluate')
+    config = compose(config_name='config', overrides=[f"+run_dir={run_dir}", f"+checkpoint_path={checkpoint_path}"])
+    print(OmegaConf.to_yaml(config))
+
+    evaluate(config)
+

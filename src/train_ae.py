@@ -4,7 +4,6 @@ import numpy as np
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from pytorch3d.loss import chamfer_distance
 
 import wandb
@@ -28,7 +27,7 @@ def train(config):
     model_name = config.model
     if config.vq:
         model_name += '_vq'
-    checkpoint_dir = os.path.join(run_dir, config.checkpoint_dir)  # Save checkpoints to run directory
+    checkpoint_dir = os.path.join(run_dir, 'checkpoints')  # Save checkpoints to run directory
 
     points_path = os.path.join(orig_dir, config.points_path)  # Load points from original path
     points = utils.load_point_sphere(points_path)
