@@ -39,8 +39,9 @@ def train(config):
     ae.to(DEVICE)
     opt = torch.optim.Adam(ae.parameters(), lr=config.lr)
 
-    timestamp = datetime.now().strftime("%Y-%m-%d.%H-%m-%S")
-    wandb.init(name=f'{model_name}_{timestamp}', config=config, project='3d-recon', entity='3drecon2')
+    date, time = run_dir.split('/')[-2:]
+    self.timestamp = f"{date}.{time}"
+    wandb.init(name=f'{model_name}_{timestamp}', config=config, project='3d-recon', entity='3drecon2', dir=orig_dir)
     wandb.watch(ae)
 
     global_iter = 0
