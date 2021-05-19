@@ -10,5 +10,6 @@ splits_path: dataset/bench_splits.json
 points_path: data/point_sphere.pt
 model: PointAlignSmall
 
-vq: True
+vq: False
+commitment_cost: 0.25 # beta in Eq 2 of VQVAE 2 paper
 

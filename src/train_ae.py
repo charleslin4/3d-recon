@@ -18,7 +18,7 @@ import utils
 
 torch.multiprocessing.set_sharing_strategy('file_system')  # Potential fix to 'received 0 items of ancdata' error
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-commitment_cost = 0.25 # beta in Eq 2 of VQVAE 2 paper
+
 
 def train(config):
 
@@ -36,12 +36,10 @@ def train(config):
     splits_path = os.path.join(orig_dir, config.splits_path)  # Load splits from original path
     deprocess_transform = utils.imagenet_deprocess()
 
-    if config.model == 'PointAlign':
-        ae = PointAlign(points)
-    elif config.vq:
+    if config.vq:
         ae = VQVAE(points)
     else:
-        ae = PointAlignSmall(points)
+        ae = PointAlignSmall(points) if config.model == 'PointAlignSmall' else PointAlign(points)
     ae.to(DEVICE)
     opt = torch.optim.Adam(ae.parameters(), lr=config.lr)
 
@@ -76,24 +74,18 @@ def train(config):
 
             if config.vq:
                 ptclds_pred, l_vq, perplexity = ae(images, RT)
-                ptclds_pred.to(DEVICE)
-                l_vq.to(DEVICE)
-                perplexity.to(DEVICE)
-                l_rec, _ = chamfer_distance(ptclds_gt, ptclds_pred)
-                info_dict['loss/rec'] = l_rec.item()
                 info_dict['loss/vq'] = l_vq.item()
                 info_dict['perplexity'] = perplexity.item()
-                vq_loss = l_rec + commitment_cost * l_vq
-                vq_loss.backward()
-                loss += vq_loss.item()
+                loss += config.commitment_cost * l_vq
             else:
                 ptclds_pred = ae(images, RT)
-                l_rec, _ = chamfer_distance(ptclds_gt, ptclds_pred)
-                l_rec.backward()
-                info_dict['loss/rec'] = l_rec.item()
-                loss += l_rec.item()
 
-            info_dict['loss/train'] = loss
+            l_rec, _ = chamfer_distance(ptclds_gt, ptclds_pred)
+            info_dict['loss/rec'] = l_rec.item()
+            loss += l_rec
+
+            loss.backward()
+            info_dict['loss/train'] = loss.item()
 
             grads = nn.utils.clip_grad_norm_(ae.parameters(), 50)
             info_dict['grads'] = grads.item()
@@ -105,14 +97,14 @@ def train(config):
                     'pt_cloud/gt': wandb.Object3D(ptclds_gt[0].detach().cpu().numpy())
                 })
 
-            print("Epoch {}\tTrain step {}\tLoss: {:.2f}".format(epoch, batch_idx, loss))
+            print("Epoch {}\tTrain step {}\tLoss: {:.2f}".format(epoch, batch_idx, loss.item()))
             wandb.log(info_dict)
 
             opt.step()
 
             if global_iter % config.save_freq == 0:
                 print(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')
-                utils.save_checkpoint_model(ae, model_name, epoch, loss, checkpoint_dir, global_iter)
+                utils.save_checkpoint_model(ae, model_name, epoch, loss.item(), checkpoint_dir, global_iter)
             
             global_iter += 1
 
@@ -129,26 +121,35 @@ def train(config):
 
         ae.eval()
         with torch.no_grad():
-            total_val_loss = 0.0
+            info_dict = {
+                'step': global_iter,
+                'loss': 0.0
+            }
+            if config.vq:
+                info_dict['ppl'] = 0.0
             for batch_idx, batch in enumerate(val_loader):
                 images, meshes, ptclds_gt, normals, RT, K = val_loader.postprocess(batch)  # meshes, normals = None
                 batch_size = images.shape[0]
 
                 loss = 0.0
                 if config.vq:
-                    ptclds_pred, l_vq = ae(images, RT)
-                    l_rec, _ = chamfer_distance(ptclds_gt, ptclds_pred)
-                    loss += l_rec.item() + commitment_cost * l_vq.item()
+                    ptclds_pred, l_vq, perplexity = ae(images, RT)
+                    loss += l_vq.item()
                 else:
                     ptclds_pred = ae(images, RT)
-                    l_rec, _ = chamfer_distance(ptclds_gt, ptclds_pred)
-                    loss += l_rec.item()
 
-                total_val_loss += loss * batch_size
+                l_rec, _ = chamfer_distance(ptclds_gt, ptclds_pred)
+                loss += l_rec.item()
 
-            val_loss = total_val_loss / len(val_loader.dataset)
-            print("Epoch {} Validation\tLoss: {:.2f}".format(epoch, val_loss))
-            wandb.log({'step': global_iter, 'loss/val': val_loss})
+                info_dict['loss'] += loss * batch_size
+                if config.vq:
+                    info_dict['ppl'] += perplexity * batch_size
+
+            info_dict['loss'] /= len(val_loader.dataset)
+            if config.vq:
+                info_dict['ppl'] /= len(val_loader.dataset)
+            print("Epoch {} Validation\tLoss: {:.2f}".format(epoch, info_dict['loss']))
+            wandb.log(info_dict)
 
         print(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')
         utils.save_checkpoint_model(ae, model_name, epoch, loss, checkpoint_dir, global_iter)
