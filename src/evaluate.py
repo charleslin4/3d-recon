@@ -116,19 +116,33 @@ def compute_metrics(ptclds_pred, ptclds_gt):
 
     return metrics
 
-# TODO render point clouds (see render_point_clouds notebook)
-def render_ptcld(ptcld):
+
+def render_ptcld(ptcld, P, save_file):
     '''
     Renders a single 3D point cloud.
 
     Inputs:
         ptcld: Tensor of shape (N, S, 3)
+        P: rotation matrix
+        save_file: file to save render to
     
     Returns:
         ptcld_img: 2D rendered image of 3D point cloud in camera coordinates
     '''
 
-    return
+    ptcld_rot = utils.rotate_verts(P, ptcld).cpu()
+    fig = plt.figure(figsize=(4, 4))
+    ax = fig.add_subplot(111, projection='3d')
+    ax.scatter3D(ptclds[..., 0], ptclds[..., 2], ptclds[..., 1], s=1)
+    ax.view_init(elev=0, azim=270)
+    ax.grid(False)
+
+    ax.set_xlim(-0.5, 0.5)
+    ax.set_ylim(-0.5, 0.5)
+    ax.set_zlim(-0.5, 0.5)
+    ax.axis('off')
+
+    plt.savefig(save_file, bbox_inches="tight")
 
 
 def evaluate(config: DictConfig):
