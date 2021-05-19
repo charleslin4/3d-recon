@@ -12,12 +12,13 @@ from omegaconf import DictConfig, OmegaConf
 import hydra
 
 from models.pointalign import PointAlign, PointAlignSmall
+from models.vqvae import VQVAE
 from datautils.dataloader import build_data_loader
 import utils
 
 torch.multiprocessing.set_sharing_strategy('file_system')  # Potential fix to 'received 0 items of ancdata' error
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-
+commitment_cost = 0.25 # beta in Eq 2 of VQVAE 2 paper
 
 def train(config):
 
@@ -35,12 +36,17 @@ def train(config):
     splits_path = os.path.join(orig_dir, config.splits_path)  # Load splits from original path
     deprocess_transform = utils.imagenet_deprocess()
 
-    ae = PointAlign(points) if config.model == 'PointAlign' else PointAlignSmall(points)
+    if config.model == 'PointAlign':
+        ae = PointAlign(points)
+    elif config.vq:
+        ae = VQVAE(points)
+    else:
+        ae = PointAlignSmall(points)
     ae.to(DEVICE)
     opt = torch.optim.Adam(ae.parameters(), lr=config.lr)
 
     date, time = run_dir.split('/')[-2:]
-    self.timestamp = f"{date}.{time}"
+    timestamp = f"{date}.{time}"
     wandb.init(name=f'{model_name}_{timestamp}', config=config, project='3d-recon', entity='3drecon2', dir=orig_dir)
     wandb.watch(ae)
 
@@ -68,15 +74,24 @@ def train(config):
             loss = 0.0
             info_dict = {'step': global_iter}
 
-            ptclds_pred = ae(images, RT)
-            l_rec, _ = chamfer_distance(ptclds_gt, ptclds_pred)
-            l_rec.backward()
-            info_dict['loss/rec'] = l_rec.item()
-            loss += l_rec.item()
-
             if config.vq:
-                # TODO Add additional VQ-VAE loss terms here
-                pass
+                ptclds_pred, l_vq, perplexity = ae(images, RT)
+                ptclds_pred.to(DEVICE)
+                l_vq.to(DEVICE)
+                perplexity.to(DEVICE)
+                l_rec, _ = chamfer_distance(ptclds_gt, ptclds_pred)
+                info_dict['loss/rec'] = l_rec.item()
+                info_dict['loss/vq'] = l_vq.item()
+                info_dict['perplexity'] = perplexity.item()
+                vq_loss = l_rec + commitment_cost * l_vq
+                vq_loss.backward()
+                loss += vq_loss.item()
+            else:
+                ptclds_pred = ae(images, RT)
+                l_rec, _ = chamfer_distance(ptclds_gt, ptclds_pred)
+                l_rec.backward()
+                info_dict['loss/rec'] = l_rec.item()
+                loss += l_rec.item()
 
             info_dict['loss/train'] = loss
 
@@ -120,13 +135,14 @@ def train(config):
                 batch_size = images.shape[0]
 
                 loss = 0.0
-                ptclds_pred = ae(images, RT)
-                l_rec, _ = chamfer_distance(ptclds_gt, ptclds_pred)
-                loss += l_rec.item()
-
                 if config.vq:
-                    # TODO Add additional VQ-VAE loss terms here
-                    pass
+                    ptclds_pred, l_vq = ae(images, RT)
+                    l_rec, _ = chamfer_distance(ptclds_gt, ptclds_pred)
+                    loss += l_rec.item() + commitment_cost * l_vq.item()
+                else:
+                    ptclds_pred = ae(images, RT)
+                    l_rec, _ = chamfer_distance(ptclds_gt, ptclds_pred)
+                    loss += l_rec.item()
 
                 total_val_loss += loss * batch_size
 
