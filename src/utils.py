@@ -178,17 +178,11 @@ def rotate_verts(RT, verts):
 
 
 def save_point_clouds(id, ptclds_pred, ptclds_gt, results_dir):
-    #deprocess = imagenet_deprocess(rescale_image=False)
-    #ptclds_img = deprocess(ptclds_img)
     ptcld_obj_file = os.path.join(results_dir, '%s.pth' % id)
     torch.save(ptclds_pred, ptcld_obj_file)
 
     ptclds_gt_obj_file = os.path.join(results_dir, '%s_gt.pth' % id)
     torch.save(ptclds_gt, ptclds_gt_obj_file)
-    
-    #ptclds_img = format_image(ptclds_pred[0])
-    #ptcld_img_file = os.path.join(results_dir, '%s.png' % id)
-    #imageio.imsave(ptcld_img_file, ptclds_img)
 
 
 def format_image(images):

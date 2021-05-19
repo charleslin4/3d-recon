@@ -209,10 +209,9 @@ def evaluate(config: DictConfig):
                 f1_03[syn_id] += cur_metrics['F1@%f' % 0.3].item()
                 f1_05[syn_id] += cur_metrics['F1@%f' % 0.5].item()
 
-            # TODO periodically save rendered point clouds
-            #if num_test % args.save_freq == 0:
-                #for i, sid in enumerate(sids):
-                    #utils.save_point_clouds(id_strs[i] + str(num_test), ptclds_pred, ptclds_gt_cam, results_dir)
+            if num_test % args.save_freq == 0:
+                for i, sid in enumerate(sids):
+                    utils.save_point_clouds(id_strs[i] + str(num_test), ptclds_pred, ptclds_gt_cam, results_dir)
     
         col_headers = [class_names[syn_id] for syn_id in syn_ids]
         chamfer_final = {class_names[syn_id] : cham_dist/num_instances[syn_id] for syn_id, cham_dist in chamfer.items()}
