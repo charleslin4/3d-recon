@@ -81,15 +81,15 @@ class VectorQuantizer(nn.Module):
             # e^(t) = m^(t) / N^(t)
             self.embed = self.dw / cluster_size.unsqueeze(0)
         
-        # Compute commitment loss (w/o multiplying by commitment_cost)
-        loss = ((quantized.detach() - x)**2).mean()
+        # Compute difference between quantized codes and inputs
+        diff = ((quantized.detach() - x)**2).mean()
         
         quantized = x + (quantized - x).detach()
         avg_probs = encodings.mean(dim=0)
         perplexity = torch.exp(-torch.sum(avg_probs * torch.log(avg_probs + 1e-10)))
 
         # do we need to return encoding_inds, encodings??
-        return quantized, loss, perplexity
+        return quantized, diff, encoding_inds, perplexity
     
 
     def quantize(self, embed_ind):
@@ -98,23 +98,23 @@ class VectorQuantizer(nn.Module):
 
 class VQVAE(nn.Module):
 
-    def __init__(self, points=None):
+    def __init__(self, points=None, num_embed=256):
         super().__init__()
 
         self.encoder, feat_dims = build_backbone('resnet18', pretrained=True)
-        self.quantize = VectorQuantizer(num_embed=256, embed_dim=512)
+        self.quantize = VectorQuantizer(num_embed, embed_dim=512)
         self.decoder = SmallDecoder(points, img_feat_dim=512, hidden_dim=128)
 
     def forward(self, images, P=None):
         z = self.encoder(images)[-1]
         z = z.permute(0, 2, 3, 1)
         
-        quant, loss_vq, perplexity = self.quantize(z)
+        quant, diff, encoding_inds, perplexity = self.quantize(z)
         quant = quant.permute(0, 3, 1, 2)  # (N, C, H, W)
-        loss = loss_vq.unsqueeze(0)
+        l_vq = diff.unsqueeze(0)
 
         ptclds = self.decoder(quant, P)
 
-        return ptclds, loss, perplexity
+        return ptclds, l_vq, encoding_inds, perplexity
 
 

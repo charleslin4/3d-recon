@@ -73,9 +73,10 @@ def train(config):
             info_dict = {'step': global_iter}
 
             if config.vq:
-                ptclds_pred, l_vq, perplexity = ae(images, RT)
+                ptclds_pred, l_vq, encoding_inds, perplexity = ae(images, RT)
                 info_dict['loss/vq'] = l_vq.item()
                 info_dict['perplexity'] = perplexity.item()
+                info_dict['encodings'] = wandb.Histogram(encoding_inds.detach().flatten().cpu().numpy(), num_bins=256)
                 loss += config.commitment_cost * l_vq
             else:
                 ptclds_pred = ae(images, RT)
@@ -133,7 +134,7 @@ def train(config):
 
                 loss = 0.0
                 if config.vq:
-                    ptclds_pred, l_vq, perplexity = ae(images, RT)
+                    ptclds_pred, l_vq, encoding_inds, perplexity = ae(images, RT)
                     loss += l_vq.item()
                 else:
                     ptclds_pred = ae(images, RT)
