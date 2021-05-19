@@ -55,7 +55,7 @@ class Decoder(nn.Module):
 
 class SmallDecoder(nn.Module):
 
-    def __init__(self, points=None, img_feat_dim=512, hidden_dim=256):
+    def __init__(self, points=None, img_feat_dim=512, hidden_dim=128):
         super().__init__()
 
         if points is None:

@@ -103,7 +103,7 @@ class VQVAE(nn.Module):
 
         self.encoder, feat_dims = build_backbone('resnet18', pretrained=True)
         self.quantize = VectorQuantizer(num_embed=256, embed_dim=512)
-        self.decoder = SmallDecoder(points, img_feat_dim=512, hidden_dim=256)
+        self.decoder = SmallDecoder(points, img_feat_dim=512, hidden_dim=128)
 
     def forward(self, images, P=None):
         z = self.encoder(images)[-1]
