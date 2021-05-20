@@ -11,5 +11,5 @@ points_path: data/point_sphere.pt
 model: PointAlignSmall
 
 vq: False
-commitment_cost: 0.25 # beta in Eq 2 of VQVAE 2 paper
+ccom: 0.25 # beta in Eq 2 of VQVAE 2 paper
 

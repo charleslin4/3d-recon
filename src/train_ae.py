@@ -76,8 +76,8 @@ def train(config):
                 ptclds_pred, l_vq, encoding_inds, perplexity = ae(images, RT)
                 info_dict['loss/vq'] = l_vq.item()
                 info_dict['ppl/train'] = perplexity.item()
-                info_dict['encodings'] = wandb.Histogram(encoding_inds.detach().flatten().cpu().numpy(), num_bins=256)
-                loss += config.commitment_cost * l_vq
+                info_dict['encodings'] = wandb.Histogram(encoding_inds.flatten().cpu().numpy(), num_bins=256)
+                loss += config.ccom * l_vq
             else:
                 ptclds_pred = ae(images, RT)
 
@@ -144,7 +144,7 @@ def train(config):
 
                 info_dict['loss/val'] += loss * batch_size
                 if config.vq:
-                    info_dict['ppl/val'] += perplexity * batch_size
+                    info_dict['ppl/val'] += perplexity.item() * batch_size
 
             info_dict['loss/val'] /= len(val_loader.dataset)
             if config.vq:

@@ -35,7 +35,9 @@ class VectorQuantizer(nn.Module):
         self.decay = decay
         self.eps = eps
 
-        embed = torch.randn(embed_dim, num_embed)
+        embed = torch.empty(embed_dim, num_embed)
+        nn.init.xavier_uniform_(embed)
+        embed.requires_grad = False
         self.register_buffer("embed", embed)
         self.register_buffer("cluster_size", torch.zeros(num_embed))
         self.register_buffer("dw", embed.clone())
@@ -71,15 +73,16 @@ class VectorQuantizer(nn.Module):
         # Use Exponential Moving Average to update embedding vectors instead of using codebook loss
         # (ie., 2nd loss term in Eq 2 of VQVAE2 paper)
         if self.training:
-            # N^(t)
-            self.cluster_size = self.decay * self.cluster_size + (1-self.decay) * encodings.sum(dim=0)
-            # m^(t) = self.decay * m^(t-1) + (1-self.decay) * \sum_{j}^{n^(t)} E(x)_{i,j}^(t)
-            self.dw = self.decay * self.dw + (1 - self.decay) * (x_flat.T @ encodings)
+            with torch.no_grad():
+                # N^(t)
+                self.cluster_size = self.decay * self.cluster_size + (1-self.decay) * encodings.sum(dim=0)
+                # m^(t) = self.decay * m^(t-1) + (1-self.decay) * \sum_{j}^{n^(t)} E(x)_{i,j}^(t)
+                self.dw = self.decay * self.dw + (1 - self.decay) * (x_flat.T @ encodings)
             
-            n = self.cluster_size.sum()
-            cluster_size = n * (self.cluster_size + self.eps) / (n + self.eps * self.num_embed)
-            # e^(t) = m^(t) / N^(t)
-            self.embed = self.dw / cluster_size.unsqueeze(0)
+                n = self.cluster_size.sum()
+                cluster_size = n * (self.cluster_size + self.eps) / (n + self.eps * self.num_embed)
+                # e^(t) = m^(t) / N^(t)
+                self.embed = self.dw / cluster_size.unsqueeze(0)
         
         # Compute difference between quantized codes and inputs
         diff = ((quantized.detach() - x)**2).mean()
@@ -98,7 +101,7 @@ class VectorQuantizer(nn.Module):
 
 class VQVAE(nn.Module):
 
-    def __init__(self, points=None, num_embed=25):
+    def __init__(self, points=None, num_embed=256):
         super().__init__()
 
         self.encoder, feat_dims = build_backbone('resnet18', pretrained=True)
