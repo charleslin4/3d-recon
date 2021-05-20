@@ -75,7 +75,7 @@ def train(config):
             if config.vq:
                 ptclds_pred, l_vq, encoding_inds, perplexity = ae(images, RT)
                 info_dict['loss/vq'] = l_vq.item()
-                info_dict['perplexity'] = perplexity.item()
+                info_dict['ppl/train'] = perplexity.item()
                 info_dict['encodings'] = wandb.Histogram(encoding_inds.detach().flatten().cpu().numpy(), num_bins=256)
                 loss += config.commitment_cost * l_vq
             else:
@@ -124,10 +124,10 @@ def train(config):
         with torch.no_grad():
             info_dict = {
                 'step': global_iter,
-                'loss': 0.0
+                'loss/val': 0.0
             }
             if config.vq:
-                info_dict['ppl'] = 0.0
+                info_dict['ppl/val'] = 0.0
             for batch_idx, batch in enumerate(val_loader):
                 images, meshes, ptclds_gt, normals, RT, K = val_loader.postprocess(batch)  # meshes, normals = None
                 batch_size = images.shape[0]
@@ -142,14 +142,14 @@ def train(config):
                 l_rec, _ = chamfer_distance(ptclds_gt, ptclds_pred)
                 loss += l_rec.item()
 
-                info_dict['loss'] += loss * batch_size
+                info_dict['loss/val'] += loss * batch_size
                 if config.vq:
-                    info_dict['ppl'] += perplexity * batch_size
+                    info_dict['ppl/val'] += perplexity * batch_size
 
-            info_dict['loss'] /= len(val_loader.dataset)
+            info_dict['loss/val'] /= len(val_loader.dataset)
             if config.vq:
-                info_dict['ppl'] /= len(val_loader.dataset)
-            print("Epoch {} Validation\tLoss: {:.2f}".format(epoch, info_dict['loss']))
+                info_dict['ppl/val'] /= len(val_loader.dataset)
+            print("Epoch {} Validation\tLoss: {:.2f}".format(epoch, info_dict['loss/val']))
             wandb.log(info_dict)
 
         print(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')

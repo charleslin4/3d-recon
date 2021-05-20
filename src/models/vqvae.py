@@ -98,7 +98,7 @@ class VectorQuantizer(nn.Module):
 
 class VQVAE(nn.Module):
 
-    def __init__(self, points=None, num_embed=256):
+    def __init__(self, points=None, num_embed=25):
         super().__init__()
 
         self.encoder, feat_dims = build_backbone('resnet18', pretrained=True)
