@@ -1,6 +1,12 @@
 # @package _global_
 
 model: transformer
+bs: 64
 hidden_dim: 128
-d_model: 144
-num_heads: 48
+num_embed: 256
+embed_dim: 300
+nhead: 100
+num_layers: 6
+encoder_path: null
+quantize_path: null
+

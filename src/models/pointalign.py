@@ -12,14 +12,17 @@ DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 class Decoder(nn.Module):
 
-    def __init__(self, points, img_feat_dim=2048, hidden_dim=512):
+    def __init__(self, points, input_dim=2048, hidden_dim=512):
         super().__init__()
 
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+
         if points is None:
-            points = torch.zeros((1, 10000, 3))
+            points = torch.randn((1, 10000, 3))
         self.register_buffer('points', points)
 
-        self.bottleneck = nn.Linear(img_feat_dim, hidden_dim)
+        self.bottleneck = nn.Linear(input_dim, hidden_dim)
         self.fc1 = nn.Linear(hidden_dim + 3, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim + 3, hidden_dim)
         self.fc3 = nn.Linear(hidden_dim + 3, hidden_dim)
@@ -55,14 +58,17 @@ class Decoder(nn.Module):
 
 class SmallDecoder(nn.Module):
 
-    def __init__(self, points=None, img_feat_dim=512, hidden_dim=128):
+    def __init__(self, points=None, input_dim=512, hidden_dim=128):
         super().__init__()
+
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
 
         if points is None:
             points = torch.zeros((1, 10000, 3))
         self.register_buffer('points', points)
 
-        self.bottleneck = nn.Linear(img_feat_dim, hidden_dim)
+        self.bottleneck = nn.Linear(input_dim, hidden_dim)
         self.fc = nn.Linear(hidden_dim + 3, hidden_dim)
         self.point_offset = nn.Linear(hidden_dim + 3, 3)
 
@@ -96,6 +102,8 @@ class PointAlign(nn.Module):
     def __init__(self, points=None, hidden_dim=512):
         super().__init__()
 
+        self.hidden_dim = hidden_dim
+
         self.encoder, feat_dims = build_backbone('resnet50', pretrained=True)
         self.decoder = Decoder(points, feat_dims[-1], hidden_dim)
 
@@ -110,6 +118,8 @@ class PointAlignSmall(nn.Module):
     
     def __init__(self, points=None, hidden_dim=128):
         super().__init__()
+
+        self.hidden_dim = hidden_dim
 
         self.encoder, feat_dims = build_backbone('resnet18', pretrained=True)
         self.decoder = SmallDecoder(points, feat_dims[-1], hidden_dim)

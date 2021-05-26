@@ -12,7 +12,7 @@ from omegaconf import DictConfig, OmegaConf
 import hydra
 
 from models.pointalign import PointAlign, PointAlignSmall
-from models.vqvae import VQVAE
+from models.vqvae import VQVAE, PointTransformer
 from datautils.dataloader import build_data_loader
 import utils
 
@@ -56,7 +56,21 @@ def train(config):
         )
 
     elif model_name == 'transformer':
-        pass
+        ae = PointTransformer(
+            points,
+            num_embed=config.num_embed,
+            embed_dim=config.embed_dim,
+            nhead=config.nhead,
+            num_layers=config.num_layers
+        )
+
+        if config.encoder_path:
+            encoder_path = hydra.utils.to_absolute_path(config.encoder_path)
+            ae.encoder.load_state_dict(torch.load(encoder_path)['model_state_dict'])
+
+        if config.quantize_path:
+            quantize_path = hydra.utils.to_absolute_path(config.quantize_path)
+            ae.quantize.load_state_dict(torch.load(quantize_path)['model_state_dict'])
 
     else:
         raise Exception("Model options are `pointalign`, `pointalignsmall`, `vqvae`, or `transformer`.")
@@ -110,8 +124,10 @@ def train(config):
             loss.backward()
             info_dict['loss/train'] = loss.item()
 
-            grads = nn.utils.clip_grad_norm_(ae.parameters(), 50)
-            info_dict['grads'] = grads.item()
+            grads_encoder = nn.utils.clip_grad_norm_(ae.encoder.parameters(), 50)
+            grads_decoder = nn.utils.clip_grad_norm_(ae.decoder.parameters(), 50)
+            info_dict['grads/encoder'] = grads_encoder.item()
+            info_dict['grads/decoder'] = grads_decoder.item()
 
             if global_iter % 250 == 0:
                 info_dict.update({

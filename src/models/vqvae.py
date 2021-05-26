@@ -3,11 +3,15 @@ from torch import nn
 from torch.nn import functional as F
 from models.backbone import build_backbone
 from models.pointalign import SmallDecoder
+from pytorch3d.datasets.r2n2.utils import project_verts
 from pytorch3d.ops import vert_align
+
 
 class VQVAE_Encoder(nn.Module):
     def __init__(self, embed_dim=144):
         super().__init__()
+
+        self.embed_dim = embed_dim
 
         self.backbone, feat_dims = build_backbone('resnet18', pretrained=True)  # (64, 128, 256, 512)
         self.bottleneck = torch.nn.Conv2d(in_channels=feat_dims[-1], out_channels=embed_dim, kernel_size=1)
@@ -17,6 +21,40 @@ class VQVAE_Encoder(nn.Module):
         img_feats = self.bottleneck(img_feats)
 
         return img_feats
+
+
+class VQVAE_Decoder(nn.Module):
+    def __init__(self, points=None, embed_dim=144, nhead=48, num_layers=6):
+        super().__init__()
+
+        self.embed_dim = embed_dim
+        self.nhead = nhead
+        self.num_layers = num_layers
+
+        if points is None:
+            points = torch.randn((1, 10000, 3))
+        self.register_buffer('points', points)
+
+        decoder_layer = nn.TransformerDecoderLayer(embed_dim, nhead)
+        self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers)
+        self.point_offset = nn.Linear(3 + 3, 3)
+
+    def forward(self, memory, P=None):
+        point_spheres = self.points.repeat(memory.shape[0], 1, 1)
+        if P is not None:
+            point_spheres = project_verts(point_spheres, P)
+
+        point_spheres_ = point_spheres.reshape(memory.shape[0], -1, self.embed_dim).permute(1, 0, 2)  # (T, N, E)
+        memory_ = memory.permute(1, 0, 2)  # (S, N, E)
+
+        transformer_out = self.transformer_decoder(point_spheres_, memory_)
+        vert_feats_nopos = transformer_out.reshape(-1, memory.shape[0], 3).permute(1, 0, 2)  # (N, 10000, 3)
+        vert_feats = torch.cat([vert_feats_nopos, point_spheres], dim=-1)
+
+        point_offsets = torch.tanh(self.point_offset(vert_feats))
+
+        out_points = point_spheres + point_offsets
+        return out_points
 
 
 class VectorQuantizer(nn.Module):
@@ -118,7 +156,10 @@ class VQVAE(nn.Module):
     def __init__(self, points=None, hidden_dim=128, num_embed=256, embed_dim=144):
         super().__init__()
 
-        resnet18, feat_dims = build_backbone('resnet18', pretrained=True)  # (64, 128, 256, 512)
+        self.hidden_dim = hidden_dim
+        self.num_embed = num_embed
+        self.embed_dim = embed_dim
+
         self.encoder = VQVAE_Encoder(embed_dim)
         self.quantize = VectorQuantizer(num_embed, embed_dim=embed_dim)
         self.decoder = SmallDecoder(points, img_feat_dim=embed_dim, hidden_dim=hidden_dim)
@@ -136,4 +177,41 @@ class VQVAE(nn.Module):
 
         return ptclds, l_vq, encoding_inds, perplexity
 
+
+class PointTransformer(nn.Module):
+    def __init__(self, points=None, num_embed=256, embed_dim=144, nhead=48, num_layers=6):
+        super().__init__()
+
+        self.num_embed = num_embed
+        self.embed_dim = embed_dim
+        self.nhead = nhead
+        self.num_layers = num_layers
+
+        self.encoder = VQVAE_Encoder(embed_dim)
+        self.quantize = VectorQuantizer(num_embed, embed_dim)
+        self.decoder = VQVAE_Decoder(points, embed_dim, nhead, num_layers)
+
+        # Freeze encoder (quantization layer has no parameters)
+        for p in self.encoder.parameters():
+            p.requires_grad = False
+
+        self.encoder.eval()
+        self.quantize.eval()
+
+    def forward(self, images, P=None):
+        img_feats = self.encoder(images)
+        img_feats = img_feats.permute(0, 2, 3, 1)  # (N, H, W, C)
+
+        quant, diff, encoding_inds, perplexity = self.quantize(img_feats)  # (N, H, W, C)
+        N, H, W, C = quant.shape
+        memory = quant.reshape(N, -1, C)
+
+        ptclds = self.decoder(memory, P)
+        return ptclds
+
+
+    def train(self, mode=True):
+        super().train(mode)
+        self.encoder.eval()
+        self.quantize.eval()
 
