@@ -1,5 +1,6 @@
 # @package _global_
 
+debug: False
 seed: 321
 data_dir: /home/data/ShapeNet/ShapeNetV1processed
 bs: 128
@@ -8,7 +9,7 @@ lr: 5.0e-4
 save_freq: 1000
 splits_path: dataset/bench_splits.json
 points_path: data/point_sphere.pt
-model: VQVAE # Point_Align, Point_Align_Small, VQVAE, VQVAE_Decoder
 
-ccom: 1e-3 # or 5e-3? beta in Eq 2 of VQVAE 2 paper
+defaults:
+  - model: vqvae # pointalign, pointalignsmall, vqvae, transformer
 

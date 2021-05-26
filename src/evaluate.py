@@ -17,7 +17,7 @@ from models.pointalign import PointAlign, PointAlignSmall
 import utils
 
 
-torch.multiprocessing.set_sharing_strategy('file_system')  # Potential fix to 'received 0 items of ancdata' error
+torch.multiprocessing.set_sharing_strategy('file_system')
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 class_names = {
     "02828884": "bench",

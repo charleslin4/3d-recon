@@ -1,0 +1,6 @@
+# @package _global_
+
+model: transformer
+hidden_dim: 128
+d_model: 144
+num_heads: 48

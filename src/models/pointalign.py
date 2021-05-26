@@ -93,30 +93,30 @@ class SmallDecoder(nn.Module):
 
 class PointAlign(nn.Module):
 
-    def __init__(self, points=None):
+    def __init__(self, points=None, hidden_dim=512):
         super().__init__()
 
         self.encoder, feat_dims = build_backbone('resnet50', pretrained=True)
-        self.decoder = Decoder(points, feat_dims[-1], 512)
+        self.decoder = Decoder(points, feat_dims[-1], hidden_dim)
 
     def forward(self, images, P=None):
-        z = self.encoder(images)[-1]
-        ptclds = self.decoder(z, P)
+        img_feats = self.encoder(images)[-1]
+        ptclds = self.decoder(img_feats, P)
 
         return ptclds
 
 
 class PointAlignSmall(nn.Module):
     
-    def __init__(self, points=None):
+    def __init__(self, points=None, hidden_dim=128):
         super().__init__()
 
         self.encoder, feat_dims = build_backbone('resnet18', pretrained=True)
-        self.decoder = SmallDecoder(points, feat_dims[-1], 128)
+        self.decoder = SmallDecoder(points, feat_dims[-1], hidden_dim)
 
     def forward(self, images, P=None):
-        z = self.encoder(images)[-1]
-        ptclds = self.decoder(z, P)
+        img_feats = self.encoder(images)[-1]
+        ptclds = self.decoder(img_feats, P)
 
         return ptclds
 

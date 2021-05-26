@@ -5,6 +5,20 @@ from models.backbone import build_backbone
 from models.pointalign import SmallDecoder
 from pytorch3d.ops import vert_align
 
+class VQVAE_Encoder(nn.Module):
+    def __init__(self, embed_dim=144):
+        super().__init__()
+
+        self.backbone, feat_dims = build_backbone('resnet18', pretrained=True)  # (64, 128, 256, 512)
+        self.bottleneck = torch.nn.Conv2d(in_channels=feat_dims[-1], out_channels=embed_dim, kernel_size=1)
+
+    def forward(self, images):
+        img_feats = F.relu(self.backbone(images)[-1])  # (64, 512, 5, 5)
+        img_feats = self.bottleneck(img_feats)
+
+        return img_feats
+
+
 class VectorQuantizer(nn.Module):
     '''
     Represents the VQ-VAE layer with exponential moving averages to update embedding vectors.
@@ -101,22 +115,20 @@ class VectorQuantizer(nn.Module):
 
 class VQVAE(nn.Module):
 
-    def __init__(self, points=None, num_embed=256):
+    def __init__(self, points=None, hidden_dim=128, num_embed=256, embed_dim=144):
         super().__init__()
 
-        self.encoder, feat_dims = build_backbone('resnet18', pretrained=True) #(64, 128, 256, 512)
-        self.conv = torch.nn.Conv2d(in_channels=512, out_channels=144, kernel_size=1)
-        self.quantize = VectorQuantizer(num_embed, embed_dim=144)
-        self.decoder = SmallDecoder(points, img_feat_dim=144, hidden_dim=128)
+        resnet18, feat_dims = build_backbone('resnet18', pretrained=True)  # (64, 128, 256, 512)
+        self.encoder = VQVAE_Encoder(embed_dim)
+        self.quantize = VectorQuantizer(num_embed, embed_dim=embed_dim)
+        self.decoder = SmallDecoder(points, img_feat_dim=embed_dim, hidden_dim=hidden_dim)
 
 
     def forward(self, images, P=None):
-        z = self.encoder(images)[-1]  # (64, 512, 5, 5)
+        img_feats = self.encoder(images)
+        img_feats = img_feats.permute(0, 2, 3, 1)  # (N, H, W, C)
 
-        z = self.conv(z)
-        z = z.permute(0, 2, 3, 1)
-        
-        quant, diff, encoding_inds, perplexity = self.quantize(z)
+        quant, diff, encoding_inds, perplexity = self.quantize(img_feats)
         quant = quant.permute(0, 3, 1, 2)  # (N, C, H, W)
         l_vq = diff.unsqueeze(0)
 
