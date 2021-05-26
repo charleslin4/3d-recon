@@ -3,6 +3,7 @@ from torch import nn
 from torch.nn import functional as F
 from models.backbone import build_backbone
 from models.pointalign import SmallDecoder
+from pytorch3d.ops import vert_align
 
 class VectorQuantizer(nn.Module):
     '''
@@ -91,7 +92,6 @@ class VectorQuantizer(nn.Module):
         avg_probs = encodings.mean(dim=0)
         perplexity = torch.exp(-torch.sum(avg_probs * torch.log(avg_probs + 1e-10)))
 
-        # do we need to return encoding_inds, encodings??
         return quantized, diff, encoding_inds, perplexity
     
 
@@ -104,12 +104,16 @@ class VQVAE(nn.Module):
     def __init__(self, points=None, num_embed=256):
         super().__init__()
 
-        self.encoder, feat_dims = build_backbone('resnet18', pretrained=True)
-        self.quantize = VectorQuantizer(num_embed, embed_dim=512)
-        self.decoder = SmallDecoder(points, img_feat_dim=512, hidden_dim=128)
+        self.encoder, feat_dims = build_backbone('resnet18', pretrained=True) #(64, 128, 256, 512)
+        self.conv = torch.nn.Conv2d(in_channels=512, out_channels=144, kernel_size=1)
+        self.quantize = VectorQuantizer(num_embed, embed_dim=144)
+        self.decoder = SmallDecoder(points, img_feat_dim=144, hidden_dim=128)
+
 
     def forward(self, images, P=None):
-        z = self.encoder(images)[-1]
+        z = self.encoder(images)[-1]  # (64, 512, 5, 5)
+
+        z = self.conv(z)
         z = z.permute(0, 2, 3, 1)
         
         quant, diff, encoding_inds, perplexity = self.quantize(z)

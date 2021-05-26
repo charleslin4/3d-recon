@@ -34,15 +34,14 @@ def imagenet_deprocess(rescale_image=True):
     return T.Compose(transforms)
 
 
-def save_checkpoint_model(model, model_name, epoch, loss, checkpoint_dir, total_iters):
+def save_checkpoint_model(model, model_name, epoch, checkpoint_dir, total_iters):
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
     save_filename = f'{model_name}_epoch{epoch}_step{total_iters}.pth'
     save_path = os.path.join(checkpoint_dir, save_filename)
     torch.save({
         'epoch': epoch,
-        'model_state_dict': model.state_dict(),
-        'loss': loss,
+        'model_state_dict': model.state_dict()
     }, save_path)
 
 

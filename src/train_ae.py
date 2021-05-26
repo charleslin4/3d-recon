@@ -27,8 +27,6 @@ def train(config):
 
     # NOTE This is all sort of janky, since we have a shared data directory on the Google Cloud VM.
     model_name = config.model
-    if config.vq:
-        model_name += '_vq'
     checkpoint_dir = os.path.join(run_dir, 'checkpoints')  # Save checkpoints to run directory
 
     points_path = os.path.join(orig_dir, config.points_path)  # Load points from original path
@@ -36,10 +34,17 @@ def train(config):
     splits_path = os.path.join(orig_dir, config.splits_path)  # Load splits from original path
     deprocess_transform = utils.imagenet_deprocess()
 
-    if config.vq:
+    if model_name == 'PointAlign':
+        ae = PointAlign(points)
+    elif model_name == 'PointAlignSmall':
+        ae = PointAlignSmall(points)
+    elif model_name == 'VQVAE':
         ae = VQVAE(points)
+    elif model_name == 'Transformer':
+        pass
     else:
-        ae = PointAlignSmall(points) if config.model == 'PointAlignSmall' else PointAlign(points)
+        raise Exception("Model options are Point_Align, Point_Align_Small, VQVAE, or Transformer.")
+
     ae.to(DEVICE)
     opt = torch.optim.Adam(ae.parameters(), lr=config.lr)
 
@@ -72,7 +77,7 @@ def train(config):
             loss = 0.0
             info_dict = {'step': global_iter}
 
-            if config.vq:
+            if model_name == 'VQVAE':
                 ptclds_pred, l_vq, encoding_inds, perplexity = ae(images, RT)
                 info_dict['loss/vq'] = l_vq.item()
                 info_dict['ppl/train'] = perplexity.item()
@@ -105,7 +110,12 @@ def train(config):
 
             if global_iter % config.save_freq == 0:
                 print(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')
-                utils.save_checkpoint_model(ae, model_name, epoch, loss.item(), checkpoint_dir, global_iter)
+                if model_name == 'VQVAE':
+                    utils.save_checkpoint_model(ae.encoder, model_name+'_Encoder', epoch, checkpoint_dir, global_iter)
+                    utils.save_checkpoint_model(ae.quantize, model_name+'_Quantize', epoch, checkpoint_dir, global_iter)
+                    utils.save_checkpoint_model(ae.decoder, model_name+'_Decoder', epoch, checkpoint_dir, global_iter)
+                else:
+                    utils.save_checkpoint_model(ae, model_name, epoch, checkpoint_dir, global_iter)
             
             global_iter += 1
 
@@ -126,16 +136,16 @@ def train(config):
                 'step': global_iter,
                 'loss/val': 0.0
             }
-            if config.vq:
+            if model_name == 'VQVAE':
                 info_dict['ppl/val'] = 0.0
             for batch_idx, batch in enumerate(val_loader):
                 images, meshes, ptclds_gt, normals, RT, K = val_loader.postprocess(batch)  # meshes, normals = None
                 batch_size = images.shape[0]
 
                 loss = 0.0
-                if config.vq:
+                if model_name == 'VQVAE':
                     ptclds_pred, l_vq, encoding_inds, perplexity = ae(images, RT)
-                    loss += l_vq.item()
+                    loss += config.ccom * l_vq.item()
                 else:
                     ptclds_pred = ae(images, RT)
 
@@ -143,17 +153,17 @@ def train(config):
                 loss += l_rec.item()
 
                 info_dict['loss/val'] += loss * batch_size
-                if config.vq:
+                if model_name == 'VQVAE':
                     info_dict['ppl/val'] += perplexity.item() * batch_size
 
             info_dict['loss/val'] /= len(val_loader.dataset)
-            if config.vq:
+            if model_name == 'VQVAE':
                 info_dict['ppl/val'] /= len(val_loader.dataset)
             print("Epoch {} Validation\tLoss: {:.2f}".format(epoch, info_dict['loss/val']))
             wandb.log(info_dict)
 
         print(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')
-        utils.save_checkpoint_model(ae, model_name, epoch, loss, checkpoint_dir, global_iter)
+        utils.save_checkpoint_model(ae, model_name, epoch, checkpoint_dir, global_iter)
 
 
 @hydra.main(config_path='config', config_name='train_ae')

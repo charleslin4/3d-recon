@@ -2,14 +2,13 @@
 
 seed: 321
 data_dir: /home/data/ShapeNet/ShapeNetV1processed
-bs: 64
-epochs: 20
+bs: 128
+epochs: 100
 lr: 5.0e-4
 save_freq: 1000
 splits_path: dataset/bench_splits.json
 points_path: data/point_sphere.pt
-model: PointAlignSmall
+model: VQVAE # Point_Align, Point_Align_Small, VQVAE, VQVAE_Decoder
 
-vq: False
-ccom: 0.25 # beta in Eq 2 of VQVAE 2 paper
+ccom: 1e-3 # or 5e-3? beta in Eq 2 of VQVAE 2 paper
 
