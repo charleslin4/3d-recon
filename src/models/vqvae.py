@@ -43,6 +43,10 @@ class VQVAE_Decoder(nn.Module):
         point_spheres = self.points.repeat(memory.shape[0], 1, 1)
         if P is not None:
             point_spheres = project_verts(point_spheres, P)
+            
+        device, dtype = point_spheres.device, point_spheres.dtype
+        factor = torch.tensor([1, -1, 1], device=device, dtype=dtype).view(1, 1, 3)
+        point_spheres = point_spheres * factor
 
         point_spheres_ = point_spheres.reshape(memory.shape[0], -1, self.embed_dim).permute(1, 0, 2)  # (T, N, E)
         memory_ = memory.permute(1, 0, 2)  # (S, N, E)
