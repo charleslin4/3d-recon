@@ -69,10 +69,12 @@ def train(config):
         if config.encoder_path:
             encoder_path = hydra.utils.to_absolute_path(config.encoder_path)
             ae.encoder.load_state_dict(torch.load(encoder_path)['model_state_dict'])
+            print(f"Loaded encoder from {encoder_path}")
 
         if config.quantize_path:
             quantize_path = hydra.utils.to_absolute_path(config.quantize_path)
             ae.quantize.load_state_dict(torch.load(quantize_path)['model_state_dict'])
+            print(f"Loaded quantizer from {quantize_path}")
 
     else:
         raise Exception("Model options are `pointalign`, `pointalignsmall`, `vqvae`, or `transformer`.")

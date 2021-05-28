@@ -43,6 +43,10 @@ class VQVAE_Decoder(nn.Module):
         point_spheres = self.points.repeat(memory.shape[0], 1, 1)
         if P is not None:
             point_spheres = project_verts(point_spheres, P)
+            
+        device, dtype = point_spheres.device, point_spheres.dtype
+        factor = torch.tensor([1, -1, 1], device=device, dtype=dtype).view(1, 1, 3)
+        point_spheres = point_spheres * factor
 
         device, dtype = point_spheres.device, point_spheres.dtype
         factor = torch.tensor([1, -1, 1], device=device, dtype=dtype).view(1, 1, 3)
@@ -168,7 +172,7 @@ class VQVAE(nn.Module):
 
         self.encoder = VQVAE_Encoder(embed_dim)
         self.quantize = VectorQuantizer(num_embed, embed_dim=embed_dim)
-        self.decoder = SmallDecoder(points, img_feat_dim=embed_dim, hidden_dim=hidden_dim)
+        self.decoder = SmallDecoder(points, input_dim=embed_dim, hidden_dim=hidden_dim)
 
 
     def forward(self, images, P=None):
