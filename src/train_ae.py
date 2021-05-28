@@ -25,13 +25,15 @@ def train(config):
     run_dir = os.getcwd()
     orig_dir = hydra.utils.get_original_cwd()
 
-    # NOTE This is all sort of janky, since we have a shared data directory on the Google Cloud VM.
     model_name = config.model
     checkpoint_dir = os.path.join(run_dir, 'checkpoints')  # Save checkpoints to run directory
 
-    points_path = hydra.utils.to_absolute_path(config.points_path)  # Load points from original path
+    # Load points, splits, and data from original path
+    points_path = hydra.utils.to_absolute_path(config.points_path)
+    splits_path =  hydra.utils.to_absolute_path(config.splits_path)
+    data_path = hydra.utils.to_absolute_path(config.data_dir)
+
     points = utils.load_point_sphere(points_path)
-    splits_path =  hydra.utils.to_absolute_path(config.splits_path)  # Load splits from original path
     deprocess_transform = utils.imagenet_deprocess()
 
     # TODO Handle cases where config does not contain kwargs
@@ -88,7 +90,7 @@ def train(config):
     for epoch in range(config.epochs):
 
         train_loader = build_data_loader(
-            data_dir=config.data_dir,
+            data_dir=data_path,
             split_name='train',
             splits_file=splits_path,
             batch_size=config.bs,
@@ -114,6 +116,8 @@ def train(config):
                 info_dict['ppl/train'] = perplexity.item()
                 info_dict['encodings'] = wandb.Histogram(encoding_inds.flatten().cpu().numpy(), num_bins=256)
                 loss += config.commitment_cost * l_vq
+            elif model_name == 'transformer':
+                ptclds_pred = ae(images, ptclds_gt, RT)
             else:
                 ptclds_pred = ae(images, RT)
 
@@ -154,7 +158,7 @@ def train(config):
             global_iter += 1
 
         val_loader = build_data_loader(
-            data_dir=config.data_dir,
+            data_dir=data_path,
             split_name='val',
             splits_file=splits_path,
             batch_size=config.bs,
@@ -180,6 +184,8 @@ def train(config):
                 if model_name == 'vqvae':
                     ptclds_pred, l_vq, encoding_inds, perplexity = ae(images, RT)
                     loss += config.commitment_cost * l_vq.item()
+                elif model_name == 'transformer':
+                    ptclds_pred = ae(images, ptclds_gt, RT)
                 else:
                     ptclds_pred = ae(images, RT)
 

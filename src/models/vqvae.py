@@ -17,7 +17,7 @@ class VQVAE_Encoder(nn.Module):
         self.bottleneck = torch.nn.Conv2d(in_channels=feat_dims[-1], out_channels=embed_dim, kernel_size=1)
 
     def forward(self, images):
-        img_feats = F.relu(self.backbone(images)[-1])  # (64, 512, 5, 5)
+        img_feats = self.backbone(images)[-1]  # (64, 512, 5, 5)
         img_feats = self.bottleneck(img_feats)
 
         return img_feats
@@ -39,21 +39,27 @@ class VQVAE_Decoder(nn.Module):
         self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers)
         self.point_offset = nn.Linear(3 + 3, 3)
 
-    def forward(self, memory, P=None):
+    def forward(self, memory, ptclds_gt, P=None):
         point_spheres = self.points.repeat(memory.shape[0], 1, 1)
         if P is not None:
             point_spheres = project_verts(point_spheres, P)
 
-        point_spheres_ = point_spheres.reshape(memory.shape[0], -1, self.embed_dim).permute(1, 0, 2)  # (T, N, E)
+        device, dtype = point_spheres.device, point_spheres.dtype
+        factor = torch.tensor([1, -1, 1], device=device, dtype=dtype).view(1, 1, 3)
+        point_spheres = point_spheres * factor
+
+        offsets = point_spheres - ptclds_gt
+
+        offsets_ = offsets.reshape(memory.shape[0], -1, self.embed_dim).permute(1, 0, 2)  # (T, N, E)
         memory_ = memory.permute(1, 0, 2)  # (S, N, E)
 
-        transformer_out = self.transformer_decoder(point_spheres_, memory_)
+        transformer_out = self.transformer_decoder(offsets_, memory_)
         vert_feats_nopos = transformer_out.reshape(-1, memory.shape[0], 3).permute(1, 0, 2)  # (N, 10000, 3)
         vert_feats = torch.cat([vert_feats_nopos, point_spheres], dim=-1)
 
-        point_offsets = torch.tanh(self.point_offset(vert_feats))
+        offsets_pred = torch.tanh(self.point_offset(vert_feats))
 
-        out_points = point_spheres + point_offsets
+        out_points = point_spheres + offsets_pred
         return out_points
 
 
@@ -198,7 +204,7 @@ class PointTransformer(nn.Module):
         self.encoder.eval()
         self.quantize.eval()
 
-    def forward(self, images, P=None):
+    def forward(self, images, ptclds_gt, P=None):
         img_feats = self.encoder(images)
         img_feats = img_feats.permute(0, 2, 3, 1)  # (N, H, W, C)
 
@@ -206,7 +212,7 @@ class PointTransformer(nn.Module):
         N, H, W, C = quant.shape
         memory = quant.reshape(N, -1, C)
 
-        ptclds = self.decoder(memory, P)
+        ptclds = self.decoder(memory, ptclds_gt, P)
         return ptclds
 
 
