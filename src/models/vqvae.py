@@ -162,7 +162,7 @@ class VQVAE(nn.Module):
 
         self.encoder = VQVAE_Encoder(embed_dim)
         self.quantize = VectorQuantizer(num_embed, embed_dim=embed_dim)
-        self.decoder = SmallDecoder(points, img_feat_dim=embed_dim, hidden_dim=hidden_dim)
+        self.decoder = SmallDecoder(points, input_dim=embed_dim, hidden_dim=hidden_dim)
 
 
     def forward(self, images, P=None):
