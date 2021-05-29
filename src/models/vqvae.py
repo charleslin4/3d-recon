@@ -7,6 +7,20 @@ from pytorch3d.datasets.r2n2.utils import project_verts
 from pytorch3d.ops import vert_align
 
 
+class PermuteGroupNorm(nn.GroupNorm):
+    def __init__(self, num_groups, num_channels, eps=1e-05, affine=True):
+        super().__init__(num_groups, num_channels, eps, affine)
+
+    def forward(self, input):
+        """
+        GroupNorm for Transformer decoder. Assumes input has shape (T, N, E).
+        """
+        input_ = input.permute(1, 2, 0)  # (N, E, T)
+        output_ = super().forward(input_)
+        output = output_.permute(2, 0, 1) # (T, N, E)
+        return output
+
+
 class VQVAE_Encoder(nn.Module):
     def __init__(self, embed_dim=144):
         super().__init__()
@@ -14,7 +28,7 @@ class VQVAE_Encoder(nn.Module):
         self.embed_dim = embed_dim
 
         self.backbone, feat_dims = build_backbone('resnet18', pretrained=True)  # (64, 128, 256, 512)
-        self.bottleneck = torch.nn.Conv2d(in_channels=feat_dims[-1], out_channels=embed_dim, kernel_size=1)
+        self.bottleneck = nn.Conv2d(in_channels=feat_dims[-1], out_channels=embed_dim, kernel_size=1)
 
     def forward(self, images):
         img_feats = self.backbone(images)[-1]  # (64, 512, 5, 5)
@@ -35,12 +49,15 @@ class VQVAE_Decoder(nn.Module):
             points = torch.randn((1, 10000, 3))
         self.register_buffer('points', points)
 
+        self.bottleneck = nn.Linear(embed_dim, 27)
         decoder_layer = nn.TransformerDecoderLayer(embed_dim, nhead)
         self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers)
+        self.fc = nn.Linear(3 + 3, 3)
         self.point_offset = nn.Linear(3 + 3, 3)
 
-    def forward(self, memory, ptclds_gt, P=None):
-        point_spheres = self.points.repeat(memory.shape[0], 1, 1)
+    def forward(self, img_feats, ptclds_gt, P=None):
+        bs = img_feats.shape[0]
+        point_spheres = self.points.repeat(bs, 1, 1)
         if P is not None:
             point_spheres = project_verts(point_spheres, P)
             
@@ -48,14 +65,20 @@ class VQVAE_Decoder(nn.Module):
         factor = torch.tensor([1, -1, 1], device=device, dtype=dtype).view(1, 1, 3)
         point_spheres = point_spheres * factor
 
+        memory = vert_align(img_feats, point_spheres)
+        memory = self.bottleneck(memory)
+        memory = torch.cat([memory, point_spheres], dim=-1)
+
         offsets = point_spheres - ptclds_gt
-        offsets_ = offsets.reshape(memory.shape[0], -1, self.embed_dim).permute(1, 0, 2)  # (T, N, E)
-        memory_ = memory.permute(1, 0, 2)  # (S, N, E)
+        offsets_ = offsets.reshape(bs, -1, self.embed_dim).permute(1, 0, 2)  # (T, N, E)
+        memory_ = memory.reshape(bs, -1, self.embed_dim).permute(1, 0, 2)  # (S, N, E)
 
         transformer_out = self.transformer_decoder(offsets_, memory_)
-        vert_feats_nopos = transformer_out.reshape(-1, memory.shape[0], 3).permute(1, 0, 2)  # (N, 10000, 3)
+        vert_feats_nopos = transformer_out.reshape(-1, bs, 3).permute(1, 0, 2)  # (N, 10000, 3)
         vert_feats = torch.cat([vert_feats_nopos, point_spheres], dim=-1)
 
+        vert_feats_nopos = F.relu(self.fc(vert_feats))
+        vert_feats = torch.cat([vert_feats_nopos, point_spheres], dim=-1)
         offsets_pred = torch.tanh(self.point_offset(vert_feats))
 
         out_points = point_spheres + offsets_pred
@@ -209,9 +232,10 @@ class PointTransformer(nn.Module):
 
         quant, diff, encoding_inds, perplexity = self.quantize(img_feats)  # (N, H, W, C)
         N, H, W, C = quant.shape
-        memory = quant.reshape(N, -1, C)
+        quant = quant.permute(0, 3, 1, 2) # (N, C, H, W)
+        # memory = quant.reshape(N, -1, C)
 
-        ptclds = self.decoder(memory, ptclds_gt, P)
+        ptclds = self.decoder(quant, ptclds_gt, P)
         return ptclds
 
 
