@@ -7,6 +7,6 @@ num_embed: 256
 embed_dim: 300
 nhead: 100
 num_layers: 6
-encoder_path: /home/clin/cs231n-project/outputs/2021-05-26/21-09-40/checkpoints/vqvae_Encoder_epoch99_step51800.pth
-quantize_path: /home/clin/cs231n-project/outputs/2021-05-26/21-09-40/checkpoints/vqvae_Quantize_epoch99_step51800.pth
+encoder_path: checkpoints/vqvae_Encoder_epoch99_step51800.pth
+quantize_path: checkpoints/vqvae_Quantize_epoch99_step51800.pth
 
