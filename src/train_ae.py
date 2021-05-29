@@ -2,6 +2,7 @@ import os
 import random
 import numpy as np
 from datetime import datetime
+import logging
 
 import torch
 import torch.nn as nn
@@ -15,6 +16,8 @@ from models.pointalign import PointAlign, PointAlignSmall
 from models.vqvae import VQVAE, PointTransformer
 from datautils.dataloader import build_data_loader
 import utils
+
+logger = logging.getLogger(__name__)
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -92,14 +95,14 @@ def train(config):
                     'pt_cloud/gt': wandb.Object3D(ptclds_gt[0].detach().cpu().numpy())
                 })
 
-            print("Epoch {}\tTrain step {}\tLoss: {:.2f}".format(epoch, batch_idx, loss.item()))
+            logger.info("Epoch {}\tTrain step {}\tLoss: {:.2f}".format(epoch, batch_idx, loss.item()))
             if not config.debug:
                 wandb.log(info_dict)
 
             opt.step()
 
             if global_iter % config.save_freq == 0 and not config.debug:
-                print(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')
+                logger.info(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')
                 utils.save_checkpoint_model(ae.encoder, model_name+'_Encoder', epoch, checkpoint_dir, global_iter)
                 utils.save_checkpoint_model(ae.decoder, model_name+'_Decoder', epoch, checkpoint_dir, global_iter)
                 if model_name == 'vqvae':
@@ -147,12 +150,12 @@ def train(config):
             info_dict['loss/val'] /= len(val_loader.dataset)
             if model_name == 'vqvae':
                 info_dict['ppl/val'] /= len(val_loader.dataset)
-            print("Epoch {} Validation\tLoss: {:.2f}".format(epoch, info_dict['loss/val']))
+            logger.info("Epoch {} Validation\tLoss: {:.2f}".format(epoch, info_dict['loss/val']))
             if not config.debug:
                 wandb.log(info_dict)
 
     if not config.debug:
-        print(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')
+        logger.info(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')
         utils.save_checkpoint_model(ae.encoder, model_name+'_Encoder', epoch, checkpoint_dir, global_iter)
         utils.save_checkpoint_model(ae.decoder, model_name+'_Decoder', epoch, checkpoint_dir, global_iter)
         if model_name == 'vqvae':
