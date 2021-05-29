@@ -1,4 +1,5 @@
 import os
+import tempfile
 import random
 import numpy as np
 from datetime import datetime
@@ -13,7 +14,7 @@ from omegaconf import DictConfig, OmegaConf
 import hydra
 
 from models.pointalign import PointAlign, PointAlignSmall
-from models.vqvae import VQVAE, PointTransformer
+from models.vqvae import VQVAE
 from datautils.dataloader import build_data_loader
 import utils
 
@@ -40,8 +41,9 @@ def train(config):
 
     date, time = run_dir.split('/')[-2:]
     timestamp = f"{date}.{time}"
+    wandb_dir = tempfile.mkdtemp()
     if not config.debug:
-        wandb.init(name=f'{model_name}_{timestamp}', config=config, project='3d-recon', entity='3drecon2', dir=orig_dir)
+        wandb.init(name=f'{model_name}_{timestamp}', config=config, project='3d-recon', entity='3drecon2', dir=wandb_dir)
         wandb.watch(ae)
 
     global_iter = 0

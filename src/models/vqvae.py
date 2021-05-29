@@ -7,27 +7,10 @@ from pytorch3d.datasets.r2n2.utils import project_verts
 from pytorch3d.ops import vert_align
 
 
-class VQVAE_Encoder(nn.Module):
-    def __init__(self, embed_dim=144):
-        super().__init__()
-
-        self.embed_dim = embed_dim
-
-        self.backbone, feat_dims = build_backbone('resnet18', pretrained=True)  # (64, 128, 256, 512)
-        self.bottleneck = torch.nn.Conv2d(in_channels=feat_dims[-1], out_channels=embed_dim, kernel_size=1)
-
-    def forward(self, images):
-        img_feats = F.relu(self.backbone(images)[-1])  # (64, 512, 5, 5)
-        img_feats = self.bottleneck(img_feats)
-
-        return img_feats
-
-
 class VQVAE_Decoder(nn.Module):
     def __init__(self, points=None, embed_dim=144, nhead=48, num_layers=6):
         super().__init__()
 
-        self.embed_dim = embed_dim
         self.nhead = nhead
         self.num_layers = num_layers
 
@@ -157,20 +140,19 @@ class VectorQuantizer(nn.Module):
 
 class VQVAE(nn.Module):
 
-    def __init__(self, points=None, hidden_dim=128, num_embed=256, embed_dim=144):
+    def __init__(self, points=None, hidden_dim=128, num_embed=256):
         super().__init__()
 
         self.hidden_dim = hidden_dim
         self.num_embed = num_embed
-        self.embed_dim = embed_dim
 
-        self.encoder = VQVAE_Encoder(embed_dim)
-        self.quantize = VectorQuantizer(num_embed, embed_dim=embed_dim)
-        self.decoder = SmallDecoder(points, input_dim=embed_dim, hidden_dim=hidden_dim)
+        self.encoder, feat_dims = build_backbone('resnet18', pretrained=True)
+        self.quantize = VectorQuantizer(num_embed, embed_dim=feat_dims[-1])
+        self.decoder = SmallDecoder(points, input_dim=feat_dims[-1], hidden_dim=hidden_dim)
 
 
     def forward(self, images, P=None):
-        img_feats = self.encoder(images)
+        img_feats = self.encoder(images)[-1]
         img_feats = img_feats.permute(0, 2, 3, 1)  # (N, H, W, C)
 
         quant, diff, encoding_inds, perplexity = self.quantize(img_feats)
@@ -180,42 +162,4 @@ class VQVAE(nn.Module):
         ptclds = self.decoder(quant, P)
 
         return ptclds, l_vq, encoding_inds, perplexity
-
-
-class PointTransformer(nn.Module):
-    def __init__(self, points=None, num_embed=256, embed_dim=144, nhead=48, num_layers=6):
-        super().__init__()
-
-        self.num_embed = num_embed
-        self.embed_dim = embed_dim
-        self.nhead = nhead
-        self.num_layers = num_layers
-
-        self.encoder = VQVAE_Encoder(embed_dim)
-        self.quantize = VectorQuantizer(num_embed, embed_dim)
-        self.decoder = VQVAE_Decoder(points, embed_dim, nhead, num_layers)
-
-        # Freeze encoder (quantization layer has no parameters)
-        for p in self.encoder.parameters():
-            p.requires_grad = False
-
-        self.encoder.eval()
-        self.quantize.eval()
-
-    def forward(self, images, P=None):
-        img_feats = self.encoder(images)
-        img_feats = img_feats.permute(0, 2, 3, 1)  # (N, H, W, C)
-
-        quant, diff, encoding_inds, perplexity = self.quantize(img_feats)  # (N, H, W, C)
-        N, H, W, C = quant.shape
-        memory = quant.reshape(N, -1, C)
-
-        ptclds = self.decoder(memory, P)
-        return ptclds
-
-
-    def train(self, mode=True):
-        super().train(mode)
-        self.encoder.eval()
-        self.quantize.eval()
 
