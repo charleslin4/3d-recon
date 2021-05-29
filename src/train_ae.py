@@ -2,6 +2,7 @@ import os
 import random
 import numpy as np
 from datetime import datetime
+import logging
 
 import torch
 import torch.nn as nn
@@ -16,6 +17,8 @@ from models.vqvae import VQVAE, PointTransformer
 from datautils.dataloader import build_data_loader
 import utils
 
+logger = logging.getLogger(__name__)
+
 torch.multiprocessing.set_sharing_strategy('file_system')
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -25,60 +28,13 @@ def train(config):
     run_dir = os.getcwd()
     orig_dir = hydra.utils.get_original_cwd()
 
-    model_name = config.model
     checkpoint_dir = os.path.join(run_dir, 'checkpoints')  # Save checkpoints to run directory
-
-    # Load points, splits, and data from original path
-    points_path = hydra.utils.to_absolute_path(config.points_path)
-    splits_path =  hydra.utils.to_absolute_path(config.splits_path)
-    data_path = hydra.utils.to_absolute_path(config.data_dir)
-
-    points = utils.load_point_sphere(points_path)
+    data_dir = hydra.utils.to_absolute_path(config.data_dir)
+    splits_path = hydra.utils.to_absolute_path(config.splits_path)  # Load splits from original path
     deprocess_transform = utils.imagenet_deprocess()
 
-    # TODO Handle cases where config does not contain kwargs
-    if model_name == 'pointalign':
-        ae = PointAlign(
-            points,
-            hidden_dim=config.hidden_dim
-        )
-
-    elif model_name == 'pointalignsmall':
-        ae = PointAlignSmall(
-            points,
-            hidden_dim=config.hidden_dim
-        )
-
-    elif model_name == 'vqvae':
-        ae = VQVAE(
-            points,
-            hidden_dim=config.hidden_dim,
-            num_embed=config.num_embed,
-            embed_dim=config.embed_dim
-        )
-
-    elif model_name == 'transformer':
-        ae = PointTransformer(
-            points,
-            num_embed=config.num_embed,
-            embed_dim=config.embed_dim,
-            nhead=config.nhead,
-            num_layers=config.num_layers
-        )
-
-        if config.encoder_path:
-            encoder_path = hydra.utils.to_absolute_path(config.encoder_path)
-            ae.encoder.load_state_dict(torch.load(encoder_path)['model_state_dict'])
-            print(f"Loaded encoder from {encoder_path}")
-
-        if config.quantize_path:
-            quantize_path = hydra.utils.to_absolute_path(config.quantize_path)
-            ae.quantize.load_state_dict(torch.load(quantize_path)['model_state_dict'])
-            print(f"Loaded quantizer from {quantize_path}")
-
-    else:
-        raise Exception("Model options are `pointalign`, `pointalignsmall`, `vqvae`, or `transformer`.")
-
+    model_name = config.model
+    ae = utils.load_model(model_name, config)
     ae.to(DEVICE)
     opt = torch.optim.Adam(ae.parameters(), lr=config.lr)
 
@@ -92,7 +48,7 @@ def train(config):
     for epoch in range(config.epochs):
 
         train_loader = build_data_loader(
-            data_dir=data_path,
+            data_dir=data_dir,
             split_name='train',
             splits_file=splits_path,
             batch_size=config.bs,
@@ -102,7 +58,6 @@ def train(config):
             num_samples=None
         )
 
-        ae.train()
         for batch_idx, batch in enumerate(train_loader):
             images, meshes, ptclds_gt, normals, RT, K = train_loader.postprocess(batch)  # meshes, normals = None
             batch_size = images.shape[0]
@@ -142,25 +97,23 @@ def train(config):
                     'pt_cloud/gt': wandb.Object3D(ptclds_gt[0].detach().cpu().numpy())
                 })
 
-            print("Epoch {}\tTrain step {}\tLoss: {:.2f}".format(epoch, batch_idx, loss.item()))
+            logger.info("Epoch {}\tTrain step {}\tLoss: {:.2f}".format(epoch, batch_idx, loss.item()))
             if not config.debug:
                 wandb.log(info_dict)
 
             opt.step()
 
             if global_iter % config.save_freq == 0 and not config.debug:
-                print(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')
-                if model_name == 'VQVAE':
-                    utils.save_checkpoint_model(ae.encoder, model_name+'_Encoder', epoch, checkpoint_dir, global_iter)
+                logger.info(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')
+                utils.save_checkpoint_model(ae.encoder, model_name+'_Encoder', epoch, checkpoint_dir, global_iter)
+                utils.save_checkpoint_model(ae.decoder, model_name+'_Decoder', epoch, checkpoint_dir, global_iter)
+                if model_name == 'vqvae':
                     utils.save_checkpoint_model(ae.quantize, model_name+'_Quantize', epoch, checkpoint_dir, global_iter)
-                    utils.save_checkpoint_model(ae.decoder, model_name+'_Decoder', epoch, checkpoint_dir, global_iter)
-                else:
-                    utils.save_checkpoint_model(ae, model_name, epoch, checkpoint_dir, global_iter)
             
             global_iter += 1
 
         val_loader = build_data_loader(
-            data_dir=data_path,
+            data_dir=data_dir,
             split_name='val',
             splits_file=splits_path,
             batch_size=config.bs,
@@ -201,18 +154,16 @@ def train(config):
             info_dict['loss/val'] /= len(val_loader.dataset)
             if model_name == 'vqvae':
                 info_dict['ppl/val'] /= len(val_loader.dataset)
-            print("Epoch {} Validation\tLoss: {:.2f}".format(epoch, info_dict['loss/val']))
+            logger.info("Epoch {} Validation\tLoss: {:.2f}".format(epoch, info_dict['loss/val']))
             if not config.debug:
                 wandb.log(info_dict)
 
     if not config.debug:
-        print(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')
+        logger.info(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')
+        utils.save_checkpoint_model(ae.encoder, model_name+'_Encoder', epoch, checkpoint_dir, global_iter)
+        utils.save_checkpoint_model(ae.decoder, model_name+'_Decoder', epoch, checkpoint_dir, global_iter)
         if model_name == 'vqvae':
-            utils.save_checkpoint_model(ae.encoder, model_name+'_Encoder', epoch, checkpoint_dir, global_iter)
             utils.save_checkpoint_model(ae.quantize, model_name+'_Quantize', epoch, checkpoint_dir, global_iter)
-            utils.save_checkpoint_model(ae.decoder, model_name+'_Decoder', epoch, checkpoint_dir, global_iter)
-        else:
-            utils.save_checkpoint_model(ae, model_name, epoch, checkpoint_dir, global_iter)
 
 
 @hydra.main(config_path='config', config_name='config')

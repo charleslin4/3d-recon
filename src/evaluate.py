@@ -161,6 +161,7 @@ def evaluate(config: DictConfig):
     print("Point clouds will be saved in: " + results_dir)
     print("Metrics will be written to: " + metrics_file)
 
+    model_name = config.model
     splits_path = os.path.join(orig_dir, config.splits_path)  # Load splits from original path
     test_loader = build_data_loader(
         data_dir=config.data_dir,
@@ -173,14 +174,8 @@ def evaluate(config: DictConfig):
         num_samples=None
     )
 
-    if config.vq:
-        raise NotImplementedError
-    else:
-        model = PointAlign() if config.model == 'PointAlign' else PointAlignSmall()
+    model = utils.load_model(model_name, config)
     model.to(DEVICE)
-
-    checkpoint = torch.load(config.checkpoint_path)
-    model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 
     splits = json.load(open(splits_path, "r"))
@@ -200,7 +195,10 @@ def evaluate(config: DictConfig):
             for syn_id in syn_ids:
                 num_instances[syn_id] += len(images)
             
-            ptclds_pred = model(images)
+            if model_name == 'vqvae':
+                ptclds_pred, l_vq, encoding_inds, perplexity = model(images, RT)
+            else:
+                ptclds_pred = model(images, RT)
             cur_metrics = compute_metrics(ptclds_pred, ptclds_gt)
 
             for i, syn_id in enumerate(syn_ids):
@@ -209,9 +207,9 @@ def evaluate(config: DictConfig):
                 f1_03[syn_id] += cur_metrics['F1@%f' % 0.3].item()
                 f1_05[syn_id] += cur_metrics['F1@%f' % 0.5].item()
 
-            if num_test % args.save_freq == 0:
-                for i, sid in enumerate(sids):
-                    utils.save_point_clouds(id_strs[i] + str(num_test), ptclds_pred, ptclds_gt_cam, results_dir)
+            if batch_idx % config.save_freq == 0:
+                for i, sid in enumerate(syn_ids):
+                    utils.save_point_clouds(id_strs[i] + str(batch_idx), ptclds_pred, ptclds_gt, results_dir)
     
         col_headers = [class_names[syn_id] for syn_id in syn_ids]
         chamfer_final = {class_names[syn_id] : cham_dist/num_instances[syn_id] for syn_id, cham_dist in chamfer.items()}
@@ -224,20 +222,26 @@ def evaluate(config: DictConfig):
             writer.writeheader()
             writer.writerows(metrics)
 
+    print(f"Saved evaluation metrics to {metrics_file}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-C', '--checkpoint_path', type=str, help='(Relative or absolute) path of the checkpoint')
+    parser.add_argument('-E', '--encoder_path', default=None, help='(Relative or absolute) path of the encoder checkpoint')
+    parser.add_argument('-Q', '--quantize_path', default=None, help='(Relative or absolute) path of the quantization checkpoint')
+    parser.add_argument('-D', '--decoder_path', default=None, help='(Relative or absolute) path of the decoder checkpoint')
     args = parser.parse_args()
 
-    checkpoint_path = os.path.abspath(args.checkpoint_path)
-    checkpoint = os.path.basename(checkpoint_path)  # /path/to/run_dir/checkpoints/checkpoint.pth
-    checkpoints_dir = os.path.dirname(checkpoint_path)
+    # Use decoder checkpoint directory as run directory
+    decoder_path = os.path.abspath(args.decoder_path)
+    checkpoints_dir = os.path.dirname(decoder_path) # /path/to/run_dir/checkpoints/checkpoint.pth
     run_dir = os.path.dirname(checkpoints_dir)
 
     config_dir = os.path.join(run_dir, '.hydra')
     initialize_config_dir(config_dir=config_dir, job_name='evaluate')
-    config = compose(config_name='config', overrides=[f"+run_dir={run_dir}", f"+checkpoint_path={checkpoint_path}"])
+    overrides = [f"+{arg}={getattr(args, arg)}" for arg in vars(args) if getattr(args, arg)]
+    overrides.append(f"+run_dir={run_dir}")
+    config = compose(config_name='config', overrides=overrides)
     print(OmegaConf.to_yaml(config))
 
     random.seed(config.seed)
