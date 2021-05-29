@@ -2,7 +2,12 @@ import os
 import torch
 import torchvision.transforms as T
 import math
-import imageio
+
+from omegaconf import DictConfig, OmegaConf
+import hydra
+
+from models.pointalign import PointAlign, PointAlignSmall
+from models.vqvae import VQVAE, PointTransformer
 
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.utils import ico_sphere
@@ -43,6 +48,59 @@ def save_checkpoint_model(model, model_name, epoch, checkpoint_dir, total_iters)
         'epoch': epoch,
         'model_state_dict': model.state_dict()
     }, save_path)
+
+
+def load_model(model_name, config):
+    """
+    Load a model. `model_name` must be one of 'pointalign', 'pointalignsmall', and 'vqvae'.
+    The config should include model configuration parameters and encoder, decoder, and 
+    quantization checkpoint paths, if applicable.
+    """
+
+    if config.points_path:
+        points_path = hydra.utils.to_absolute_path(config.points_path)  # Load points from original path
+    points = load_point_sphere(points_path) if points_path else None
+
+    # TODO Handle cases where config does not contain kwargs
+    if model_name == 'pointalign':
+        model = PointAlign(
+            points,
+            hidden_dim=config.hidden_dim
+        )
+
+    elif model_name == 'pointalignsmall':
+        model = PointAlignSmall(
+            points,
+            hidden_dim=config.hidden_dim
+        )
+
+    elif model_name == 'vqvae':
+        model = VQVAE(
+            points,
+            hidden_dim=config.hidden_dim,
+            num_embed=config.num_embed,
+            embed_dim=config.embed_dim
+        )
+
+    else:
+        raise Exception("`model_name` must be one of 'pointalign', 'pointalignsmall', and 'vqvae'.")
+
+    if hasattr(config, 'encoder_path'):
+        encoder_path = hydra.utils.to_absolute_path(config.encoder_path)
+        model.encoder.load_state_dict(torch.load(encoder_path)['model_state_dict'])
+        print(f"Loaded encoder from {encoder_path}")
+
+    if hasattr(config, 'quantize_path'):
+        quantize_path = hydra.utils.to_absolute_path(config.quantize_path)
+        model.quantize.load_state_dict(torch.load(quantize_path)['model_state_dict'])
+        print(f"Loaded quantizer from {quantize_path}")
+
+    if hasattr(config, 'decoder_path'):
+        decoder_path = hydra.utils.to_absolute_path(config.decoder_path)
+        model.decoder.load_state_dict(torch.load(decoder_path)['model_state_dict'])
+        print(f"Loaded decoder from {decoder_path}")
+
+    return model
 
 
 def sample_points_from_sphere(clouds, points_per_cloud=10000, save_path=None):
