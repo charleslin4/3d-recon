@@ -195,7 +195,10 @@ def evaluate(config: DictConfig):
             for syn_id in syn_ids:
                 num_instances[syn_id] += len(images)
             
-            ptclds_pred = model(images)
+            if model_name == 'vqvae':
+                ptclds_pred, l_vq, encoding_inds, perplexity = model(images, RT)
+            else:
+                ptclds_pred = model(images, RT)
             cur_metrics = compute_metrics(ptclds_pred, ptclds_gt)
 
             for i, syn_id in enumerate(syn_ids):
@@ -218,6 +221,8 @@ def evaluate(config: DictConfig):
             writer = csv.DictWriter(csvfile, fieldnames=col_headers)
             writer.writeheader()
             writer.writerows(metrics)
+
+    print(f"Saved evaluation metrics to {metrics_file}")
 
 
 if __name__ == "__main__":
