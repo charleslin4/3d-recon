@@ -92,20 +92,10 @@ def load_model(model_name, config):
     else:
         raise Exception("`model_name` must be one of 'pointalign', 'pointalignsmall', and 'vqvae'.")
 
-    if hasattr(config, 'encoder_path'):
-        encoder_path = hydra.utils.to_absolute_path(config.encoder_path)
-        model.encoder.load_state_dict(torch.load(encoder_path)['model_state_dict'])
-        print(f"Loaded encoder from {encoder_path}")
-
-    if hasattr(config, 'quantize_path'):
-        quantize_path = hydra.utils.to_absolute_path(config.quantize_path)
-        model.quantize.load_state_dict(torch.load(quantize_path)['model_state_dict'])
-        print(f"Loaded quantizer from {quantize_path}")
-
-    if hasattr(config, 'decoder_path'):
-        decoder_path = hydra.utils.to_absolute_path(config.decoder_path)
-        model.decoder.load_state_dict(torch.load(decoder_path)['model_state_dict'])
-        print(f"Loaded decoder from {decoder_path}")
+    if hasattr(config, 'checkpoint_path'):
+        checkpoint_path = hydra.utils.to_absolute_path(config.checkpoint_path)
+        model.load_state_dict(torch.load(checkpoint_path)['model_state_dict'])
+        print(f"Loaded checkpoint from {checkpoint_path}")
 
     return model
 
