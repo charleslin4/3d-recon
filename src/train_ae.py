@@ -1,4 +1,5 @@
 import os
+import tempfile
 import random
 import numpy as np
 from datetime import datetime
@@ -12,8 +13,6 @@ import wandb
 from omegaconf import DictConfig, OmegaConf
 import hydra
 
-from models.pointalign import PointAlign, PointAlignSmall
-from models.vqvae import VQVAE, PointTransformer
 from datautils.dataloader import build_data_loader
 import utils
 
@@ -40,8 +39,9 @@ def train(config):
 
     date, time = run_dir.split('/')[-2:]
     timestamp = f"{date}.{time}"
+    wandb_dir = tempfile.mkdtemp()
     if not config.debug:
-        wandb.init(name=f'{model_name}_{timestamp}', config=config, project='3d-recon', entity='3drecon2', dir=orig_dir)
+        wandb.init(name=f'{model_name}_{timestamp}', config=config, project='3d-recon', entity='3drecon2', dir=wandb_dir)
         wandb.watch(ae)
 
     global_iter = 0
@@ -73,8 +73,11 @@ def train(config):
                 info_dict['ppl/train'] = perplexity.item()
                 info_dict['encodings'] = wandb.Histogram(encoding_inds.flatten().cpu().numpy(), num_bins=256)
                 loss += config.commitment_cost * l_vq
-            elif model_name == 'transformer':
-                ptclds_pred = ae(images, ptclds_gt, RT)
+            elif model_name == 'vae':
+                ptclds_pred, mu, logvar = ae(images, RT)
+                l_kl = (-0.5 * torch.sum(1 + logvar - mu**2 - logvar.exp(), dim=1)).mean()
+                info_dict['loss/kl'] = l_kl.item()
+                loss += config.beta * l_kl
             else:
                 ptclds_pred = ae(images, RT)
 
@@ -131,6 +134,7 @@ def train(config):
             }
             if model_name == 'vqvae':
                 info_dict['ppl/val'] = 0.0
+
             for batch_idx, batch in enumerate(val_loader):
                 images, meshes, ptclds_gt, normals, RT, K = val_loader.postprocess(batch)  # meshes, normals = None
                 batch_size = images.shape[0]
@@ -139,8 +143,10 @@ def train(config):
                 if model_name == 'vqvae':
                     ptclds_pred, l_vq, encoding_inds, perplexity = ae(images, RT)
                     loss += config.commitment_cost * l_vq.item()
-                elif model_name == 'transformer':
-                    ptclds_pred = ae(images, ptclds_gt, RT)
+                elif model_name == 'vae':
+                    ptclds_pred, mu, logvar = ae(images, RT)
+                    l_kl = (-0.5 * torch.sum(1 + logvar - mu**2 - logvar.exp(), dim=1)).mean()
+                    loss += config.beta * l_kl
                 else:
                     ptclds_pred = ae(images, RT)
 
@@ -154,6 +160,7 @@ def train(config):
             info_dict['loss/val'] /= len(val_loader.dataset)
             if model_name == 'vqvae':
                 info_dict['ppl/val'] /= len(val_loader.dataset)
+
             logger.info("Epoch {} Validation\tLoss: {:.2f}".format(epoch, info_dict['loss/val']))
             if not config.debug:
                 wandb.log(info_dict)

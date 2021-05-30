@@ -7,7 +7,8 @@ from omegaconf import DictConfig, OmegaConf
 import hydra
 
 from models.pointalign import PointAlign, PointAlignSmall
-from models.vqvae import VQVAE, PointTransformer
+from models.vae import VAE
+from models.vqvae import VQVAE
 
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.utils import ico_sphere
@@ -74,12 +75,18 @@ def load_model(model_name, config):
             hidden_dim=config.hidden_dim
         )
 
+    elif model_name == 'vae':
+        model = VAE(
+            points,
+            latent_dim=config.latent_dim,
+            hidden_dim=config.hidden_dim
+        )
+
     elif model_name == 'vqvae':
         model = VQVAE(
             points,
             hidden_dim=config.hidden_dim,
             num_embed=config.num_embed,
-            embed_dim=config.embed_dim
         )
 
     else:

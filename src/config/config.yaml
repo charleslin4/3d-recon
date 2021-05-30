@@ -3,7 +3,7 @@
 debug: False
 seed: 321
 data_dir: /home/data/ShapeNet/ShapeNetV1processed
-bs: 128
+bs: 64
 epochs: 100
 lr: 5.0e-4
 save_freq: 1000
