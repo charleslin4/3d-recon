@@ -3,45 +3,6 @@ from torch import nn
 from torch.nn import functional as F
 from models.backbone import build_backbone
 from models.pointalign import SmallDecoder
-from pytorch3d.datasets.r2n2.utils import project_verts
-from pytorch3d.ops import vert_align
-
-
-class VQVAE_Decoder(nn.Module):
-    def __init__(self, points=None, embed_dim=144, nhead=48, num_layers=6):
-        super().__init__()
-
-        self.nhead = nhead
-        self.num_layers = num_layers
-
-        if points is None:
-            points = torch.randn((1, 10000, 3))
-        self.register_buffer('points', points)
-
-        decoder_layer = nn.TransformerDecoderLayer(embed_dim, nhead)
-        self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers)
-        self.point_offset = nn.Linear(3 + 3, 3)
-
-    def forward(self, memory, P=None):
-        point_spheres = self.points.repeat(memory.shape[0], 1, 1)
-        if P is not None:
-            point_spheres = project_verts(point_spheres, P)
-            
-        device, dtype = point_spheres.device, point_spheres.dtype
-        factor = torch.tensor([1, -1, 1], device=device, dtype=dtype).view(1, 1, 3)
-        point_spheres = point_spheres * factor
-
-        point_spheres_ = point_spheres.reshape(memory.shape[0], -1, self.embed_dim).permute(1, 0, 2)  # (T, N, E)
-        memory_ = memory.permute(1, 0, 2)  # (S, N, E)
-
-        transformer_out = self.transformer_decoder(point_spheres_, memory_)
-        vert_feats_nopos = transformer_out.reshape(-1, memory.shape[0], 3).permute(1, 0, 2)  # (N, 10000, 3)
-        vert_feats = torch.cat([vert_feats_nopos, point_spheres], dim=-1)
-
-        point_offsets = torch.tanh(self.point_offset(vert_feats))
-
-        out_points = point_spheres + point_offsets
-        return out_points
 
 
 class VectorQuantizer(nn.Module):
@@ -76,12 +37,12 @@ class VectorQuantizer(nn.Module):
         self.eps = eps
 
         embed = torch.empty(embed_dim, num_embed)
-        nn.init.xavier_uniform_(embed)
+        nn.init.uniform_(embed, -1 / num_embed, 1 / num_embed)
         embed.requires_grad = False
         self.register_buffer("embed", embed)
         self.register_buffer("cluster_size", torch.zeros(num_embed))
         self.register_buffer("dw", embed.clone())
-    
+
 
     def forward(self, x):
         '''
