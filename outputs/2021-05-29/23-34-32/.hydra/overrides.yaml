@@ -1,0 +1,2 @@
+- model=pointalignsmall
+- data_dir=data/ShapeNet/ShapeNetV1processed
