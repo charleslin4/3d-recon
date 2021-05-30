@@ -1,0 +1,3 @@
+- model=vqvae
+- data_dir=data/ShapeNet/ShapeNetV1processed
+- commitment_cost=1.0e-3

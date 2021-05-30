@@ -1,0 +1,13 @@
+debug: false
+seed: 321
+data_dir: data/ShapeNet/ShapeNetV1processed
+bs: 64
+epochs: 100
+lr: 0.0005
+save_freq: 1000
+splits_path: dataset/bench_splits.json
+points_path: data/point_sphere.pt
+model: vqvae
+hidden_dim: 128
+commitment_cost: 0.001
+num_embed: 256
