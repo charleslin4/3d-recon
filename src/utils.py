@@ -9,6 +9,7 @@ import hydra
 from models.pointalign import PointAlign, PointAlignSmall
 from models.vae import VAE
 from models.vqvae import VQVAE
+from models.decoder import FCDecoder
 
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.utils import ico_sphere
@@ -62,50 +63,51 @@ def load_model(model_name, config):
         points_path = hydra.utils.to_absolute_path(config.points_path)  # Load points from original path
     points = load_point_sphere(points_path) if points_path else None
 
-    # TODO Handle cases where config does not contain kwargs
     if model_name == 'pointalign':
-        model = PointAlign(
-            points,
-            hidden_dim=config.hidden_dim
-        )
+        kwargs = {k: getattr(config, k) for k in ['hidden_dim'] if hasattr(config, k)}
+        model = PointAlign(points, **kwargs)
 
     elif model_name == 'pointalignsmall':
-        model = PointAlignSmall(
-            points,
-            hidden_dim=config.hidden_dim
-        )
+        kwargs = {k: getattr(config, k) for k in ['hidden_dim'] if hasattr(config, k)}
+        model = PointAlignSmall(points, **kwargs)
 
     elif model_name == 'vae':
-        model = VAE(
-            points,
-            latent_dim=config.latent_dim,
-            hidden_dim=config.hidden_dim
-        )
+        kwargs = {k: getattr(config, k) for k in ['latent_dim', 'hidden_dim'] if hasattr(config, k)}
+        model = VAE(points, **kwargs)
 
     elif model_name == 'vqvae':
-        model = VQVAE(
-            points,
-            hidden_dim=config.hidden_dim,
-            num_embed=config.num_embed,
-        )
+        kwargs = {k: getattr(config, k) for k in ['hidden_dim', 'num_embed'] if hasattr(config, k)}
+        model = VQVAE(points, **kwargs)
 
     else:
         raise Exception("`model_name` must be one of 'pointalign', 'pointalignsmall', and 'vqvae'.")
 
-    if hasattr(config, 'encoder_path'):
-        encoder_path = hydra.utils.to_absolute_path(config.encoder_path)
-        model.encoder.load_state_dict(torch.load(encoder_path)['model_state_dict'])
-        print(f"Loaded encoder from {encoder_path}")
+    if hasattr(config, 'checkpoint_path'):
+        checkpoint_path = hydra.utils.to_absolute_path(config.checkpoint_path)
+        model.load_state_dict(torch.load(checkpoint_path)['model_state_dict'])
+        print(f"Loaded checkpoint from {checkpoint_path}")
 
-    if hasattr(config, 'quantize_path'):
-        quantize_path = hydra.utils.to_absolute_path(config.quantize_path)
-        model.quantize.load_state_dict(torch.load(quantize_path)['model_state_dict'])
-        print(f"Loaded quantizer from {quantize_path}")
+    # Replace decoder
+    if getattr(config, 'decoder', None) == 'fc':
+        kwargs = {k: getattr(config, k) for k in ['hidden_dim', 'num_layers'] if hasattr(config, k)}
+        kwargs['input_dim'] = model.decoder.input_dim
+        model.decoder = FCDecoder(points, **kwargs)
+        print(f'Replaced decoder with FCDecoder with {config.num_layers} layers and hidden dimension {config.hidden_dim}')
 
-    if hasattr(config, 'decoder_path'):
-        decoder_path = hydra.utils.to_absolute_path(config.decoder_path)
-        model.decoder.load_state_dict(torch.load(decoder_path)['model_state_dict'])
-        print(f"Loaded decoder from {decoder_path}")
+        def train(self, mode: bool=True):
+            super(type(self), self).train(mode)
+            for k in self._modules:
+                if k != 'decoder':
+                    getattr(self, k).eval()
+
+        for k in model._modules:
+            if k != 'decoder':
+                for p in getattr(model, k).parameters():
+                    p.requires_grad = False
+
+        type(model).train = train
+        model.train()
+        print(f'Froze non-decoder submodules')
 
     return model
 

@@ -65,7 +65,7 @@ class SmallDecoder(nn.Module):
         self.hidden_dim = hidden_dim
 
         if points is None:
-            points = torch.zeros((1, 10000, 3))
+            points = torch.randn((1, 10000, 3))
         self.register_buffer('points', points)
 
         self.bottleneck = nn.Linear(input_dim, hidden_dim)

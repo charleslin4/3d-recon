@@ -56,7 +56,7 @@ def compute_cham_dist(metrics, ptclds1, ptclds2):
             with at most P2 points in each batch element, batch size N, and feature dimension D.
     '''
     
-    cham_dist, _ = chamfer_distance(ptclds1, ptclds2, batch_reduction='sum', point_reduction="mean")
+    cham_dist, _ = chamfer_distance(ptclds1, ptclds2, batch_reduction=None, point_reduction="mean")
     metrics["Chamfer"] = cham_dist
     
     return
@@ -86,7 +86,7 @@ def compute_f1_scores(metrics, ptclds_pred, ptclds_gt, thresholds=[0.1, 0.2, 0.3
     knn_pred = knn_points(ptclds_pred, ptclds_gt, lengths1=pred_lengths, lengths2=gt_lengths, K=1)
     # Compute L2 distances between each predicted point and its nearest ground-truth
     pred_to_gt_dists = np.sqrt(knn_pred.dists[..., 0].cpu()) #(N, S)
-    
+
     # For each ground-truth point, find its nearest-neighbor predicted point
     knn_gt = knn_points(ptclds_gt, ptclds_pred, lengths1=gt_lengths, lengths2=pred_lengths, K=1)
     # Compute L2 distances between each ground-truth point and its nearest predicted point
@@ -97,12 +97,12 @@ def compute_f1_scores(metrics, ptclds_pred, ptclds_gt, thresholds=[0.1, 0.2, 0.3
         precision = 100.0 * (pred_to_gt_dists < t).float().mean(dim=1) #(N,)
         recall = 100.0 * (gt_to_pred_dists < t).float().mean(dim=1) #(N,)
         f1 = (2.0 * precision * recall) / (precision + recall + eps) #(N,)
-        metrics["F1@%f" % t] = f1.sum(axis=0)
-    
+        metrics["F1@%f" % t] = f1
+
     return
 
 
-def compute_metrics(ptclds_pred, ptclds_gt):
+def compute_metrics(ptclds_pred, ptclds_gt, thresholds):
     '''
     Inputs:
         ptclds_pred: Tensor of shape (N, S, 3) giving coordinates for each predicted point cloud
@@ -118,7 +118,7 @@ def compute_metrics(ptclds_pred, ptclds_gt):
     '''
     metrics = {}
     compute_cham_dist(metrics, ptclds_pred, ptclds_gt)
-    compute_f1_scores(metrics, ptclds_pred, ptclds_gt)
+    compute_f1_scores(metrics, ptclds_pred, ptclds_gt, thresholds)
     metrics = {k: v.cpu() for k, v in metrics.items()}
 
     return metrics
@@ -230,44 +230,45 @@ def evaluate(config: DictConfig):
 
     num_instances = {syn_id: 0 for syn_id in syn_ids}
     chamfer = {syn_id: 0 for syn_id in syn_ids}
-    f1_01 = {syn_id: 0 for syn_id in syn_ids}
-    f1_03 = {syn_id: 0 for syn_id in syn_ids}
-    f1_05 = {syn_id: 0 for syn_id in syn_ids}
+    f1_1e_4 = {syn_id: 0 for syn_id in syn_ids}
+    f1_2e_4 = {syn_id: 0 for syn_id in syn_ids}
 
     print("Starting evaluation")
-    
+
     with torch.no_grad():
         for batch_idx, batch in enumerate(test_loader):
             images, _, ptclds_gt, normals, RT, K, id_strs = test_loader.postprocess(batch)
-            for syn_id in syn_ids:
-                num_instances[syn_id] += len(images)
-            
+            sids = [id_str.split("-")[0] for id_str in id_strs]
+            for sid in sids:
+                num_instances[sid] += 1
+
             if model_name == 'vqvae':
                 ptclds_pred, l_vq, encoding_inds, perplexity = model(images, RT)
                 ptclds_pred_sampled = model.latent_sample(config.bs)
+            elif model_name == 'vae':
+                ptclds_pred, mu, logvar = model(images, RT)
             else:
                 ptclds_pred = model(images, RT)
-            cur_metrics = compute_metrics(ptclds_pred, ptclds_gt)
+            cur_metrics = compute_metrics(ptclds_pred, ptclds_gt, thresholds=[0.01, 0.014142])
 
-            for i, syn_id in enumerate(syn_ids):
-                chamfer[syn_id] += cur_metrics['Chamfer'].item()
-                f1_01[syn_id] += cur_metrics['F1@%f' % 0.1].item()
-                f1_03[syn_id] += cur_metrics['F1@%f' % 0.3].item()
-                f1_05[syn_id] += cur_metrics['F1@%f' % 0.5].item()
+            for i, sid in enumerate(sids):
+                chamfer[sid] += cur_metrics['Chamfer'][i].item()
+                f1_1e_4[sid] += cur_metrics["F1@%f" % 0.01][i].item()
+                f1_2e_4[sid] += cur_metrics["F1@%f" % 0.014142][i].item()
 
             if batch_idx % config.save_freq == 0:
-                for i, sid in enumerate(syn_ids):
+                for i, sid in enumerate(sid):
                     utils.save_point_clouds(id_strs[i] + str(batch_idx), ptclds_pred, ptclds_gt, results_dir)
                     if model_name == 'vqvae':
                         utils.save_sampled_ptclds(id_strs[i] + str(batch_idx), ptclds_pred_sampled, results_dir)
                         breakpoint()
     
+
         col_headers = [class_names[syn_id] for syn_id in syn_ids]
-        chamfer_final = {class_names[syn_id] : cham_dist/num_instances[syn_id] for syn_id, cham_dist in chamfer.items()}
-        f1_01_final = {class_names[syn_id] : f1_01/num_instances[syn_id] for syn_id, f1_01 in f1_01.items()}
-        f1_03_final = {class_names[syn_id] : f1_03/num_instances[syn_id] for syn_id, f1_03 in f1_03.items()}
-        f1_05_final = {class_names[syn_id] : f1_05/num_instances[syn_id] for syn_id, f1_05 in f1_05.items()}
-        metrics = [chamfer_final, f1_01_final, f1_03_final, f1_05_final] 
+        chamfer_final = {class_names[syn_id] : cham_dist / num_instances[syn_id] for syn_id, cham_dist in chamfer.items()}
+        f1_1e_4_final = {class_names[syn_id] : f1_score / num_instances[syn_id] for syn_id, f1_score in f1_1e_4.items()}
+        f1_2e_4_final = {class_names[syn_id] : f1_score / num_instances[syn_id] for syn_id, f1_score in f1_2e_4.items()}
+        metrics = [chamfer_final, f1_1e_4_final, f1_2e_4_final] 
         with open(metrics_file, 'w') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=col_headers)
             writer.writeheader()
@@ -280,19 +281,20 @@ def evaluate(config: DictConfig):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-E', '--encoder_path', default=None, help='(Relative or absolute) path of the encoder checkpoint')
-    parser.add_argument('-Q', '--quantize_path', default=None, help='(Relative or absolute) path of the quantization checkpoint')
-    parser.add_argument('-D', '--decoder_path', default=None, help='(Relative or absolute) path of the decoder checkpoint')
+    parser.add_argument('-C', '--checkpoint_path', default=None, help='(Relative or absolute) path of the model checkpoint')
     args = parser.parse_args()
 
     # Use decoder checkpoint directory as run directory
-    checkpoints_dir = os.path.dirname(os.path.abspath('./outputs/2021-05-29/17-30-11/checkpoints/vqvae_epoch99_step51800.pth')) # /path/to/run_dir/checkpoints/checkpoint.pth
+    checkpoint_path = os.path.abspath(args.checkpoint_path)
+    checkpoints_dir = os.path.dirname(checkpoint_path) # /path/to/run_dir/checkpoints/checkpoint.pth
     run_dir = os.path.dirname(checkpoints_dir)
 
     config_dir = os.path.join(run_dir, '.hydra')
     initialize_config_dir(config_dir=config_dir, job_name='evaluate')
-    overrides = [f"+{arg}={getattr(args, arg)}" for arg in vars(args) if getattr(args, arg)]
-    overrides.append(f"+run_dir={run_dir}")
+    overrides = [
+        f"+run_dir={run_dir}",
+        f"+checkpoint_path={checkpoint_path}"
+    ]
     config = compose(config_name='config', overrides=overrides)
     print(OmegaConf.to_yaml(config))
 

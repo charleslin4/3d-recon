@@ -1,0 +1,4 @@
+# @package _global_
+
+decoder: fc
+num_layers: 0

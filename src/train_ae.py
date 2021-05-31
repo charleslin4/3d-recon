@@ -41,7 +41,9 @@ def train(config):
     timestamp = f"{date}.{time}"
     wandb_dir = tempfile.mkdtemp()
     if not config.debug:
-        wandb.init(name=f'{model_name}_{timestamp}', config=config, project='3d-recon', entity='3drecon2', dir=wandb_dir)
+        decoder = f'_{config.decoder}{config.num_layers}' if config.decoder else ''
+        run_name = f'{model_name}{decoder}_{timestamp}'
+        wandb.init(name=run_name, config=config, project='3d-recon', entity='3drecon2', dir=wandb_dir)
         wandb.watch(ae)
 
     global_iter = 0
@@ -93,7 +95,7 @@ def train(config):
             info_dict['grads/encoder'] = grads_encoder.item()
             info_dict['grads/decoder'] = grads_decoder.item()
 
-            if global_iter % 250 == 0:
+            if global_iter % config.save_freq == 0:
                 info_dict.update({
                     'image': wandb.Image(deprocess_transform(images)[0].permute(1, 2, 0).cpu().numpy()),
                     'pt_cloud/pred': wandb.Object3D(ptclds_pred[0].detach().cpu().numpy()),
@@ -108,11 +110,8 @@ def train(config):
 
             if global_iter % config.save_freq == 0 and not config.debug:
                 logger.info(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')
-                utils.save_checkpoint_model(ae.encoder, model_name+'_Encoder', epoch, checkpoint_dir, global_iter)
-                utils.save_checkpoint_model(ae.decoder, model_name+'_Decoder', epoch, checkpoint_dir, global_iter)
-                if model_name == 'vqvae':
-                    utils.save_checkpoint_model(ae.quantize, model_name+'_Quantize', epoch, checkpoint_dir, global_iter)
-            
+                utils.save_checkpoint_model(ae, model_name, epoch, checkpoint_dir, global_iter)
+ 
             global_iter += 1
 
         val_loader = build_data_loader(
@@ -167,10 +166,7 @@ def train(config):
 
     if not config.debug:
         logger.info(f'Saving the latest model (epoch {epoch}, global_iter {global_iter})')
-        utils.save_checkpoint_model(ae.encoder, model_name+'_Encoder', epoch, checkpoint_dir, global_iter)
-        utils.save_checkpoint_model(ae.decoder, model_name+'_Decoder', epoch, checkpoint_dir, global_iter)
-        if model_name == 'vqvae':
-            utils.save_checkpoint_model(ae.quantize, model_name+'_Quantize', epoch, checkpoint_dir, global_iter)
+        utils.save_checkpoint_model(ae, model_name, epoch, checkpoint_dir, global_iter)
 
 
 @hydra.main(config_path='config', config_name='config')
