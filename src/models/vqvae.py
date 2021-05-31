@@ -102,43 +102,41 @@ class VectorQuantizer(nn.Module):
 
 class VQVAE(nn.Module):
 
-    def __init__(self, points=None, hidden_dim=128, num_embed=256, num_samples=128):
+    def __init__(self, points=None, hidden_dim=128, num_embed=256):
         super().__init__()
 
         self.hidden_dim = hidden_dim
         self.num_embed = num_embed
-        self.num_samples = num_samples
 
         self.encoder, feat_dims = build_backbone('resnet18', pretrained=True)
         self.embed_dim = feat_dims[-1]
         self.quantize = VectorQuantizer(self.num_embed, embed_dim=self.embed_dim)
         self.decoder = SmallDecoder(points, input_dim=self.embed_dim, hidden_dim=self.hidden_dim)
 
-    def latent_sample(self, bs, P=None):
-        embed_dim, num_embed = self.quantize.embed.shape
-        # Sample latents uniformly w/o replacement
-        uniform_dist = torch.tensor([1.0/num_embed for i in range(num_embed)])
-        latents = torch.empty((bs, 5*5, embed_dim))
-        for i in range(bs):
-            sampled_inds = torch.multinomial(uniform_dist, 5*5, replacement=False)
-            latents[i] = self.quantize.quantize(sampled_inds.to(DEVICE)).to(DEVICE)
-        
-        decoder_input = latents.to(DEVICE).view((64, 512, 5, 5))
-        ptclds = self.decoder(decoder_input, P)
-        
-        return ptclds
+
+    def latent_sample(self, bs):
+        uniform_dist = torch.tensor([1.0 / self.num_embed for i in range(self.num_embed)])
+        sampled_inds = torch.multinomial(uniform_dist, bs * 5 * 5, replacement=True).to(self.quantize.embed.device)
+        sampled_inds = sampled_inds.reshape(bs, 5, 5)
+        latents = self.quantize.quantize(sampled_inds)
+
+        latents = latents.permute(0, 3, 1, 2)
+        return sampled_inds, latents
+
+
+    def decode(self, latents, P=None):
+        return self.decoder(latents, P)
 
 
     def forward(self, images, P=None):
-        bs = images.shape[0]
         img_feats = self.encoder(images)[-1]
         img_feats = img_feats.permute(0, 2, 3, 1)  # (N, H, W, C)
-        
+
         quant, diff, encoding_inds, perplexity = self.quantize(img_feats)
         quant = quant.permute(0, 3, 1, 2)  # (N, C, H, W)
         l_vq = diff.unsqueeze(0)
-        
-        ptclds = self.decoder(quant, P)
+
+        ptclds = self.decode(quant, P)
 
         return ptclds, l_vq, encoding_inds, perplexity
 

@@ -261,7 +261,6 @@ def evaluate(config: DictConfig):
                     utils.save_point_clouds(id_strs[i] + str(batch_idx), ptclds_pred, ptclds_gt, results_dir)
                     if model_name == 'vqvae':
                         utils.save_sampled_ptclds(id_strs[i] + str(batch_idx), ptclds_pred_sampled, results_dir)
-                        breakpoint()
     
 
         col_headers = [class_names[syn_id] for syn_id in syn_ids]
