@@ -4,8 +4,16 @@ import argparse
 import numpy as np
 import csv
 import json
+import hydra
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+import umap
+from sklearn.metrics import pairwise_distances
+from sklearn.manifold import TSNE
 
 import torch
+import torch.nn.functional as F
 from pytorch3d.loss import chamfer_distance
 from pytorch3d.ops import knn_points
 
@@ -15,7 +23,6 @@ from hydra.experimental import compose, initialize_config_dir
 from datautils.dataloader import build_data_loader
 from models.pointalign import PointAlign, PointAlignSmall
 import utils
-
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -116,7 +123,7 @@ def compute_metrics(ptclds_pred, ptclds_gt):
 
     return metrics
 
-
+# TODO: render some sampled latent point clouds
 def render_ptcld(ptcld, P, save_file):
     '''
     Renders a single 3D point cloud.
@@ -145,26 +152,66 @@ def render_ptcld(ptcld, P, save_file):
     plt.savefig(save_file, bbox_inches="tight")
 
 
+def plot_heatmap(model, results_dir):
+    '''
+    Plot embeddings pairwise distance heatmap.
+    '''
+    embed = model.quantize.embed.data
+    pairwise_dist = F.pdist(embed.t(), p=2)
+    N = embed.t().shape[0]
+    pairwise_distances = torch.zeros((N, N-1))
+    temp = torch.triu_indices(N, N-1)
+    pairwise_distances[temp[0], temp[1]] = pairwise_dist
+    pairwise_distances = pairwise_distances.cpu().numpy()
+
+    plt.figure(1)
+    sns.set(rc={'figure.figsize':(4, 4)})
+    mask = np.tril(np.ones_like(pairwise_distances, dtype=bool))
+    sns.heatmap(pairwise_distances, cmap="BuGn_r", mask=mask, xticklabels=32, yticklabels=32)
+    
+    save_file_fig = os.path.join(results_dir, 'heatmap.png')
+    plt.savefig(save_file_fig, bbox_inches="tight")
+    save_file_embed = os.path.join(results_dir, 'embed.csv')
+    np.savetxt(save_file_embed, embed.cpu().numpy(), delimiter = ',')
+
+
+def plot_embeddings(model, results_dir):
+    plt.figure(2)
+    proj = umap.UMAP(n_neighbors=5,
+                 min_dist=0.1,
+                 metric='euclidean').fit_transform(model.quantize.embed.data.cpu().numpy())
+    plt.scatter(proj[:,0], proj[:,1], alpha=0.3)
+    save_file = os.path.join(results_dir, 'view_embeds.png')
+    plt.savefig(save_file, bbox_inches="tight")
+
+
+# TODO: plot latent representations of input images
+# See plot_latent in https://avandekleut.github.io/vae/
+def plot_latents(images):
+    pass
+
+
+
 def evaluate(config: DictConfig):
     '''
     Tests the model and saves metrics and point cloud predictions.
 
     Adapted from https://github.com/facebookresearch/meshrcnn/blob/df9617e9089f8d3454be092261eead3ca48abc29/shapenet/evaluation/eval.py
     '''
-
     orig_dir = os.getcwd()
     results_dir = os.path.join(config.run_dir, 'results')  # Save checkpoints to run directory
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
 
     metrics_file = os.path.join(results_dir, 'metrics.csv')
-    print("Point clouds will be saved in: " + results_dir)
+    print("Point clouds and plots will be saved in: " + results_dir)
     print("Metrics will be written to: " + metrics_file)
 
     model_name = config.model
     splits_path = os.path.join(orig_dir, config.splits_path)  # Load splits from original path
+    data_dir = os.path.join('/home', config.data_dir)
     test_loader = build_data_loader(
-        data_dir=config.data_dir,
+        data_dir=data_dir,
         split_name='test',
         splits_file=splits_path,
         batch_size=config.bs,
@@ -197,6 +244,7 @@ def evaluate(config: DictConfig):
             
             if model_name == 'vqvae':
                 ptclds_pred, l_vq, encoding_inds, perplexity = model(images, RT)
+                ptclds_pred_sampled = model.latent_sample(config.bs)
             else:
                 ptclds_pred = model(images, RT)
             cur_metrics = compute_metrics(ptclds_pred, ptclds_gt)
@@ -210,6 +258,9 @@ def evaluate(config: DictConfig):
             if batch_idx % config.save_freq == 0:
                 for i, sid in enumerate(syn_ids):
                     utils.save_point_clouds(id_strs[i] + str(batch_idx), ptclds_pred, ptclds_gt, results_dir)
+                    if model_name == 'vqvae':
+                        utils.save_sampled_ptclds(id_strs[i] + str(batch_idx), ptclds_pred_sampled, results_dir)
+                        breakpoint()
     
         col_headers = [class_names[syn_id] for syn_id in syn_ids]
         chamfer_final = {class_names[syn_id] : cham_dist/num_instances[syn_id] for syn_id, cham_dist in chamfer.items()}
@@ -223,7 +274,9 @@ def evaluate(config: DictConfig):
             writer.writerows(metrics)
 
     print(f"Saved evaluation metrics to {metrics_file}")
-
+    plot_heatmap(model, results_dir)
+    plot_embeddings(model, results_dir)
+    print(f"Saved plots to {results_dir}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -233,8 +286,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Use decoder checkpoint directory as run directory
-    decoder_path = os.path.abspath(args.decoder_path)
-    checkpoints_dir = os.path.dirname(decoder_path) # /path/to/run_dir/checkpoints/checkpoint.pth
+    checkpoints_dir = os.path.dirname(os.path.abspath('./outputs/2021-05-29/17-30-11/checkpoints/vqvae_epoch99_step51800.pth')) # /path/to/run_dir/checkpoints/checkpoint.pth
     run_dir = os.path.dirname(checkpoints_dir)
 
     config_dir = os.path.join(run_dir, '.hydra')
