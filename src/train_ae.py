@@ -41,7 +41,9 @@ def train(config):
     timestamp = f"{date}.{time}"
     wandb_dir = tempfile.mkdtemp()
     if not config.debug:
-        wandb.init(name=f'{model_name}_{timestamp}', config=config, project='3d-recon', entity='3drecon2', dir=wandb_dir)
+        decoder = f'_{config.decoder}{config.num_layers}' if config.decoder else ''
+        run_name = f'{model_name}{decoder}_{timestamp}'
+        wandb.init(name=run_name, config=config, project='3d-recon', entity='3drecon2', dir=wandb_dir)
         wandb.watch(ae)
 
     global_iter = 0

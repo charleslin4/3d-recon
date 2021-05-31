@@ -9,6 +9,7 @@ import hydra
 from models.pointalign import PointAlign, PointAlignSmall
 from models.vae import VAE
 from models.vqvae import VQVAE
+from models.decoder import FCDecoder
 
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.utils import ico_sphere
@@ -96,6 +97,32 @@ def load_model(model_name, config):
         checkpoint_path = hydra.utils.to_absolute_path(config.checkpoint_path)
         model.load_state_dict(torch.load(checkpoint_path)['model_state_dict'])
         print(f"Loaded checkpoint from {checkpoint_path}")
+
+    # Replace decoder
+    if getattr(config, 'decoder', None) == 'fc':
+        input_dim = model.decoder.input_dim
+        model.decoder = FCDecoder(
+            points,
+            input_dim=input_dim,
+            hidden_dim=config.hidden_dim,
+            num_layers=config.num_layers
+        )
+        print(f'Replaced decoder with FCDecoder with {config.num_layers} layers and hidden dimension {config.hidden_dim}')
+
+        def train(self, mode: bool=True):
+            super(type(self), self).train(mode)
+            for k in self._modules:
+                if k != 'decoder':
+                    getattr(self, k).eval()
+
+        for k in model._modules:
+            if k != 'decoder':
+                for p in getattr(model, k).parameters():
+                    p.requires_grad = False
+
+        type(model).train = train
+        model.train()
+        print(f'Froze non-decoder submodules')
 
     return model
 

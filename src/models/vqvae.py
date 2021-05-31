@@ -93,7 +93,7 @@ class VectorQuantizer(nn.Module):
         perplexity = torch.exp(-torch.sum(avg_probs * torch.log(avg_probs + 1e-10)))
 
         return quantized, diff, encoding_inds, perplexity
-    
+
 
     def quantize(self, embed_ind):
         return F.embedding(embed_ind, self.embed.T)
@@ -108,9 +108,9 @@ class VQVAE(nn.Module):
         self.num_embed = num_embed
 
         self.encoder, feat_dims = build_backbone('resnet18', pretrained=True)
-        self.quantize = VectorQuantizer(num_embed, embed_dim=feat_dims[-1])
-        self.decoder = SmallDecoder(points, input_dim=feat_dims[-1], hidden_dim=hidden_dim)
-
+        self.embed_dim = feat_dims[-1]
+        self.quantize = VectorQuantizer(self.num_embed, embed_dim=self.embed_dim)
+        self.decoder = SmallDecoder(points, input_dim=self.embed_dim, hidden_dim=self.hidden_dim)
 
     def forward(self, images, P=None):
         img_feats = self.encoder(images)[-1]
