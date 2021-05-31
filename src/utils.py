@@ -63,32 +63,21 @@ def load_model(model_name, config):
         points_path = hydra.utils.to_absolute_path(config.points_path)  # Load points from original path
     points = load_point_sphere(points_path) if points_path else None
 
-    # TODO Handle cases where config does not contain kwargs
     if model_name == 'pointalign':
-        model = PointAlign(
-            points,
-            hidden_dim=config.hidden_dim
-        )
+        kwargs = {k: getattr(config, k) for k in ['hidden_dim'] if hasattr(config, k)}
+        model = PointAlign(points, **kwargs)
 
     elif model_name == 'pointalignsmall':
-        model = PointAlignSmall(
-            points,
-            hidden_dim=config.hidden_dim
-        )
+        kwargs = {k: getattr(config, k) for k in ['hidden_dim'] if hasattr(config, k)}
+        model = PointAlignSmall(points, **kwargs)
 
     elif model_name == 'vae':
-        model = VAE(
-            points,
-            latent_dim=config.latent_dim,
-            hidden_dim=config.hidden_dim
-        )
+        kwargs = {k: getattr(config, k) for k in ['latent_dim', 'hidden_dim'] if hasattr(config, k)}
+        model = VAE(points, **kwargs)
 
     elif model_name == 'vqvae':
-        model = VQVAE(
-            points,
-            hidden_dim=config.hidden_dim,
-            num_embed=config.num_embed,
-        )
+        kwargs = {k: getattr(config, k) for k in ['hidden_dim', 'num_embed'] if hasattr(config, k)}
+        model = VQVAE(points, **kwargs)
 
     else:
         raise Exception("`model_name` must be one of 'pointalign', 'pointalignsmall', and 'vqvae'.")
@@ -100,13 +89,9 @@ def load_model(model_name, config):
 
     # Replace decoder
     if getattr(config, 'decoder', None) == 'fc':
-        input_dim = model.decoder.input_dim
-        model.decoder = FCDecoder(
-            points,
-            input_dim=input_dim,
-            hidden_dim=config.hidden_dim,
-            num_layers=config.num_layers
-        )
+        kwargs = {k: getattr(config, k) for k in ['hidden_dim', 'num_layers'] if hasattr(config, k)}
+        kwargs['input_dim'] = model.decoder.input_dim
+        model.decoder = FCDecoder(points, **kwargs)
         print(f'Replaced decoder with FCDecoder with {config.num_layers} layers and hidden dimension {config.hidden_dim}')
 
         def train(self, mode: bool=True):
