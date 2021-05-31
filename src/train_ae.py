@@ -37,12 +37,13 @@ def train(config):
     ae.to(DEVICE)
     opt = torch.optim.Adam(ae.parameters(), lr=config.lr)
 
+    if config.decoder:
+        model_name += f'_{config.decoder}{config.num_layers}'
     date, time = run_dir.split('/')[-2:]
     timestamp = f"{date}.{time}"
     wandb_dir = tempfile.mkdtemp()
     if not config.debug:
-        decoder = f'_{config.decoder}{config.num_layers}' if config.decoder else ''
-        run_name = f'{model_name}{decoder}_{timestamp}'
+        run_name = f'{model_name}_{timestamp}'
         wandb.init(name=run_name, config=config, project='3d-recon', entity='3drecon2', dir=wandb_dir)
         wandb.watch(ae)
 
