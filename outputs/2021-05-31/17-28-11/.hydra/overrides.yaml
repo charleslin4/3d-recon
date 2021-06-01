@@ -1,0 +1,6 @@
+- model=vae
+- data_dir=data/ShapeNet/ShapeNetV1processed
+- beta=5.0e-3
+- lr=5.0e-5
+- save_freq=10000
+- latent_dim=16

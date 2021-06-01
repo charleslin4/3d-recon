@@ -1,0 +1,13 @@
+debug: false
+seed: 321
+data_dir: data/ShapeNet/ShapeNetV1processed
+bs: 64
+epochs: 100
+lr: 5.0e-05
+save_freq: 10000
+splits_path: dataset/bench_splits.json
+points_path: data/point_sphere.pt
+model: vae
+latent_dim: 16
+hidden_dim: 128
+beta: 0.005

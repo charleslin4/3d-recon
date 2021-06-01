@@ -1,4 +1,0 @@
-- model=vae
-- data_dir=data/ShapeNet/ShapeNetV1processed
-- beta=1.0e-4
-- lr=1.0e-4

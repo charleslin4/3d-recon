@@ -69,13 +69,13 @@ def train(config):
             loss = 0.0
             info_dict = {'step': global_iter}
 
-            if model_name == 'vqvae':
+            if model_name.startswith('vqvae'):
                 ptclds_pred, l_vq, encoding_inds, perplexity = ae(images, RT)
                 info_dict['loss/vq'] = l_vq.item()
                 info_dict['ppl/train'] = perplexity.item()
                 info_dict['encodings'] = wandb.Histogram(encoding_inds.flatten().cpu().numpy(), num_bins=256)
                 loss += config.commitment_cost * l_vq
-            elif model_name == 'vae':
+            elif model_name.startswith('vae'):
                 ptclds_pred, mu, logvar = ae(images, RT)
                 l_kl = (-0.5 * torch.sum(1 + logvar - mu**2 - logvar.exp(), dim=1)).mean()
                 info_dict['loss/kl'] = l_kl.item()
@@ -131,7 +131,7 @@ def train(config):
                 'step': global_iter,
                 'loss/val': 0.0
             }
-            if model_name == 'vqvae':
+            if model_name.startswith('vqvae'):
                 info_dict['ppl/val'] = 0.0
 
             for batch_idx, batch in enumerate(val_loader):
@@ -139,10 +139,10 @@ def train(config):
                 batch_size = images.shape[0]
 
                 loss = 0.0
-                if model_name == 'vqvae':
+                if model_name.startswith('vqvae'):
                     ptclds_pred, l_vq, encoding_inds, perplexity = ae(images, RT)
                     loss += config.commitment_cost * l_vq.item()
-                elif model_name == 'vae':
+                elif model_name.startswith('vae'):
                     ptclds_pred, mu, logvar = ae(images, RT)
                     l_kl = (-0.5 * torch.sum(1 + logvar - mu**2 - logvar.exp(), dim=1)).mean()
                     loss += config.beta * l_kl
@@ -153,11 +153,11 @@ def train(config):
                 loss += l_rec.item()
 
                 info_dict['loss/val'] += loss * batch_size
-                if model_name == 'vqvae':
+                if model_name.startswith('vqvae'):
                     info_dict['ppl/val'] += perplexity.item() * batch_size
 
             info_dict['loss/val'] /= len(val_loader.dataset)
-            if model_name == 'vqvae':
+            if model_name.startswith('vqvae'):
                 info_dict['ppl/val'] /= len(val_loader.dataset)
 
             logger.info("Epoch {} Validation\tLoss: {:.2f}".format(epoch, info_dict['loss/val']))
