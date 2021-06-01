@@ -4,12 +4,15 @@ from torch.nn import functional as F
 from models.backbone import build_backbone
 from models.pointalign import SmallDecoder
 
+DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+
 
 class VAE(nn.Module):
 
     def __init__(self, points=None, latent_dim=8, hidden_dim=128):
         super().__init__()
 
+        self.latent_dim = latent_dim
         self.hidden_dim = hidden_dim
 
         self.encoder, feat_dims = build_backbone('resnet18', pretrained=True)
@@ -28,6 +31,13 @@ class VAE(nn.Module):
             return eps
 
 
+    def decode(self, latents, P=None):
+        bs = latents.shape[0]
+        decoder_input = self.fc_decode(latents)
+        decoder_input = decoder_input.view((bs, -1, 5, 5))
+        return self.decoder(decoder_input, P)
+
+
     def forward(self, images, P=None):
         bs = images.shape[0]
         img_feats = self.encoder(images)[-1]  # (N, C, H, W)
@@ -37,9 +47,7 @@ class VAE(nn.Module):
         logvar = self.fc_logvar(flat_feats)
         sample = self.latent_sample(mu, logvar)
 
-        decoder_input = self.fc_decode(sample)
-        decoder_input = decoder_input.view(img_feats.shape)
-        ptclds = self.decoder(decoder_input, P)
+        ptclds = self.decode(sample, P)
 
         return ptclds, mu, logvar
 
