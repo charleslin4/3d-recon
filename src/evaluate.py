@@ -230,6 +230,7 @@ def evaluate(config: DictConfig):
     f1_1e_4 = {syn_id: 0 for syn_id in syn_ids}
     f1_2e_4 = {syn_id: 0 for syn_id in syn_ids}
     total_perplexity = 0.0
+    num_examples = 0
 
     print("Starting evaluation")
 
@@ -237,6 +238,7 @@ def evaluate(config: DictConfig):
     with torch.no_grad():
         for batch_idx, batch in enumerate(test_loader):
             images, _, ptclds_gt, normals, RT, K, id_strs = test_loader.postprocess(batch)
+            num_examples += images.shape[0]
             sids = [id_str.split("-")[0] for id_str in id_strs]
             for sid in sids:
                 num_instances[sid] += 1
@@ -247,8 +249,7 @@ def evaluate(config: DictConfig):
             if model_name == 'vqvae':
                 ptclds_pred, l_vq, encoding_inds, perplexity = model(images, RT)
                 encoding_indices.append(encoding_inds)
-                # TODO add perplexity (this is wrong)
-                total_perplexity += perplexity
+                total_perplexity += perplexity * images.shape[0]
             elif model_name == 'vae':
                 ptclds_pred, mu, logvar = model(images, RT)
             else:
@@ -278,8 +279,7 @@ def evaluate(config: DictConfig):
             writer = csv.DictWriter(csvfile, fieldnames=col_headers)
             writer.writeheader()
             writer.writerows(metrics)
-        # TODO fix perplexity calculation
-        perplexity_final = total_perplexity
+        perplexity_final = total_perplexity / num_examples
         print('Perplexity: ', perplexity_final)
 
     if model_name == 'vqvae':
@@ -289,10 +289,6 @@ def evaluate(config: DictConfig):
     print(f"Saved evaluation metrics to {metrics_file}")
 
 if __name__ == "__main__":
-    path = './outputs/2021-05-29/17-30-11/checkpoints/vqvae_epoch99_step51800.pth'
-    #path = 'outputs/2021-05-31/17-28-11/checkpoints/vae_epoch99_step51800.pth'
-    #path = 'outputs/2021-05-29/23-34-32/checkpoints/pointalignsmall_epoch99_step51800.pth'
-
     parser = argparse.ArgumentParser()
     parser.add_argument('-C', '--checkpoint_path', default=path, help='(Relative or absolute) path of the model checkpoint')
     args = parser.parse_args()
@@ -316,4 +312,3 @@ if __name__ == "__main__":
     torch.manual_seed(config.seed)
 
     evaluate(config)
-

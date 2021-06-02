@@ -59,9 +59,6 @@ def sample(config: DictConfig, num_samples):
         print(f'Saved VAE latents to {latents_path}')
 
 if __name__ == "__main__":
-    #path = './outputs/2021-05-29/17-30-11/checkpoints/vqvae_epoch99_step51800.pth'
-    path = 'outputs/2021-05-31/17-28-11/checkpoints/vae_epoch99_step51800.pth'
-
     parser = argparse.ArgumentParser()
     parser.add_argument('-C', '--checkpoint_path', default=path, help='(Relative or absolute) path of the model checkpoint')
     parser.add_argument('-N', '--num_samples', type=int, default=1000)
