@@ -26,7 +26,7 @@ def sample(config: DictConfig, num_samples):
     model.to(DEVICE)
     model.eval()
 
-    ptclds, inds = [], []
+    ptclds, inds, all_latents = [], [], []
 
     with torch.no_grad():
         for sample_idx in range(0, num_samples, config.bs):
@@ -36,6 +36,7 @@ def sample(config: DictConfig, num_samples):
                 mu = torch.zeros((bs, config.latent_dim), device=DEVICE)
                 logvar = torch.zeros((bs, config.latent_dim), device=DEVICE)
                 latents = model.latent_sample(mu, logvar)
+                all_latents.append(latents)
                 sampled_ptclds = model.decode(latents)
                 ptclds.append(sampled_ptclds)
 
@@ -52,11 +53,17 @@ def sample(config: DictConfig, num_samples):
         inds_path = os.path.join(results_dir, f'inds_{timestamp}.pt')
         torch.save(torch.cat(inds, dim=0), inds_path)
         print(f'Saved indices to {inds_path}')
-
+    if all_latents:
+        latents_path = os.path.join(results_dir, f'vae_latents_{timestamp}.pt')
+        torch.save(torch.cat(all_latents, dim=0), latents_path)
+        print(f'Saved VAE latents to {latents_path}')
 
 if __name__ == "__main__":
+    #path = './outputs/2021-05-29/17-30-11/checkpoints/vqvae_epoch99_step51800.pth'
+    path = 'outputs/2021-05-31/17-28-11/checkpoints/vae_epoch99_step51800.pth'
+
     parser = argparse.ArgumentParser()
-    parser.add_argument('-C', '--checkpoint_path', default=None, help='(Relative or absolute) path of the model checkpoint')
+    parser.add_argument('-C', '--checkpoint_path', default=path, help='(Relative or absolute) path of the model checkpoint')
     parser.add_argument('-N', '--num_samples', type=int, default=1000)
     args = parser.parse_args()
 

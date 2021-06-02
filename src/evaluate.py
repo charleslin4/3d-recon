@@ -185,13 +185,6 @@ def plot_embeddings(model, results_dir):
     plt.savefig(save_file, bbox_inches="tight")
 
 
-# TODO: plot latent representations of input images
-# See plot_latent in https://avandekleut.github.io/vae/
-def plot_latents(images):
-    pass
-
-
-
 def evaluate(config: DictConfig):
     '''
     Tests the model and saves metrics and point cloud predictions.
@@ -225,6 +218,10 @@ def evaluate(config: DictConfig):
     model.to(DEVICE)
     model.eval()
 
+    if model_name == 'vqvae':
+        save_file = os.path.join(results_dir, 'embed.pt')
+        torch.save(model.quantize.embed, save_file)
+
     splits = json.load(open(splits_path, "r"))
     syn_ids = [syn_id for syn_id in splits['test'].keys()]
 
@@ -232,19 +229,26 @@ def evaluate(config: DictConfig):
     chamfer = {syn_id: 0 for syn_id in syn_ids}
     f1_1e_4 = {syn_id: 0 for syn_id in syn_ids}
     f1_2e_4 = {syn_id: 0 for syn_id in syn_ids}
+    total_perplexity = 0.0
 
     print("Starting evaluation")
 
+    encoding_indices = []
     with torch.no_grad():
         for batch_idx, batch in enumerate(test_loader):
             images, _, ptclds_gt, normals, RT, K, id_strs = test_loader.postprocess(batch)
             sids = [id_str.split("-")[0] for id_str in id_strs]
             for sid in sids:
                 num_instances[sid] += 1
+            if batch_idx == 0:
+                torch.save(RT, os.path.join(results_dir, 'RT.pt'))
+                torch.save(K, os.path.join(results_dir, 'K.pt'))
 
             if model_name == 'vqvae':
                 ptclds_pred, l_vq, encoding_inds, perplexity = model(images, RT)
-                ptclds_pred_sampled = model.latent_sample(config.bs)
+                encoding_indices.append(encoding_inds)
+                # TODO add perplexity (this is wrong)
+                total_perplexity += perplexity
             elif model_name == 'vae':
                 ptclds_pred, mu, logvar = model(images, RT)
             else:
@@ -258,10 +262,12 @@ def evaluate(config: DictConfig):
 
             if batch_idx % config.save_freq == 0:
                 for i, sid in enumerate(sid):
-                    utils.save_point_clouds(id_strs[i] + str(batch_idx), ptclds_pred, ptclds_gt, results_dir)
-                    if model_name == 'vqvae':
-                        utils.save_sampled_ptclds(id_strs[i] + str(batch_idx), ptclds_pred_sampled, results_dir)
-    
+                    ptcld_obj_file = os.path.join(results_dir, f'ptcld_{id_strs[i]}_{batch_idx}.pt')
+                    torch.save(ptclds_pred, ptcld_obj_file)
+                    ptclds_gt_obj_file = os.path.join(results_dir, f'ptcld_gt_{id_strs[i]}_{batch_idx}.pt')
+                    torch.save(ptclds_gt, ptclds_gt_obj_file)
+                    img_file = os.path.join(results_dir, f'img_gt_{id_strs[i]}_{batch_idx}.pt')
+                    torch.save(images[batch_idx], img_file)
 
         col_headers = [class_names[syn_id] for syn_id in syn_ids]
         chamfer_final = {class_names[syn_id] : cham_dist / num_instances[syn_id] for syn_id, cham_dist in chamfer.items()}
@@ -272,15 +278,23 @@ def evaluate(config: DictConfig):
             writer = csv.DictWriter(csvfile, fieldnames=col_headers)
             writer.writeheader()
             writer.writerows(metrics)
+        # TODO fix perplexity calculation
+        perplexity_final = total_perplexity
+        print('Perplexity: ', perplexity_final)
 
+    if model_name == 'vqvae':
+        encoding_inds_path = os.path.join(results_dir, f'encoding_inds.pt')
+        torch.save(torch.cat(encoding_indices, dim=0), encoding_inds_path)
+    
     print(f"Saved evaluation metrics to {metrics_file}")
-    plot_heatmap(model, results_dir)
-    plot_embeddings(model, results_dir)
-    print(f"Saved plots to {results_dir}")
 
 if __name__ == "__main__":
+    path = './outputs/2021-05-29/17-30-11/checkpoints/vqvae_epoch99_step51800.pth'
+    #path = 'outputs/2021-05-31/17-28-11/checkpoints/vae_epoch99_step51800.pth'
+    #path = 'outputs/2021-05-29/23-34-32/checkpoints/pointalignsmall_epoch99_step51800.pth'
+
     parser = argparse.ArgumentParser()
-    parser.add_argument('-C', '--checkpoint_path', default=None, help='(Relative or absolute) path of the model checkpoint')
+    parser.add_argument('-C', '--checkpoint_path', default=path, help='(Relative or absolute) path of the model checkpoint')
     args = parser.parse_args()
 
     # Use decoder checkpoint directory as run directory

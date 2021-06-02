@@ -243,19 +243,6 @@ def rotate_verts(RT, verts):
     return verts_rot
 
 
-def save_point_clouds(id, ptclds_pred, ptclds_gt, results_dir):
-    ptcld_obj_file = os.path.join(results_dir, '%s.pth' % id)
-    torch.save(ptclds_pred, ptcld_obj_file)
-
-    ptclds_gt_obj_file = os.path.join(results_dir, '%s_gt.pth' % id)
-    torch.save(ptclds_gt, ptclds_gt_obj_file)
-
-
-def save_sampled_ptclds(id, ptclds_pred_sampled, results_dir):
-    ptclds_sampled_obj_file = os.path.join(results_dir, '%s_sampled.pth' % id)
-    torch.save(ptclds_pred_sampled, ptclds_sampled_obj_file)
-
-
 def format_image(images):
     return (255. * images).detach().cpu().numpy().clip(0, 255).astype('uint8').transpose(1, 2, 0)
 
